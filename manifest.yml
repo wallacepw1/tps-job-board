@@ -27,6 +27,8 @@ oauth_config:
       - channels:read
       - commands
       - chat:write
+      - lists:read
+      - users:read
 settings:
   event_subscriptions:
     request_url: https://tps-job-board.onrender.com/slack/events

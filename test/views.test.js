@@ -15,8 +15,8 @@ const jobs = [
 const store = { jobs, techs: () => ['Eduardo'], updatedAt: now };
 
 test('tabs split jobs by day and status', () => {
-  // Today = booked times, then today's calls, then older calls still open; finished ones drop off.
-  assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' }).map((j) => j.jobNumber), ['132174', '132181', '132179']);
+  // Today = only today's jobs: booked times first, then today's calls. Older open calls go to All open.
+  assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' }).map((j) => j.jobNumber), ['132174', '132181']);
   assert.deepEqual(filterJobs(jobs, { tab: 'open', tech: 'unassigned' }).map((j) => j.jobNumber), ['132181', '132179']);
   assert.deepEqual(filterJobs(jobs, { tab: 'recent', tech: 'all' }).map((j) => j.jobNumber), ['132162']);
 });

@@ -14,10 +14,10 @@ Each card shows the job #, client, address, issue, status, time and tech, with b
 | --- | --- |
 | Job details (client, address, issue, Drive folder) | PaulLatenode intake post in #incoming-calls, or the calendar event description |
 | Appointment time | The job's latest post in #future-calls ("The call is Scheduled for…"), then a "Rescheduled:…" reply in the thread, then the TPS Jobs calendar |
-| Tech | "Call assigned to *Name*" reply in the thread |
-| Done | "Call completed" reply in the thread |
+| Tech | The job's row in the **Calls** Slack list (Assignee, once Assigned is checked), else the "Call assigned to *Name*" reply in the thread |
+| Done | The **Completed** checkbox on the Calls list row (not the to-do checkbox), else a "Call completed" reply in the thread |
 
-New calls count as work for the day they came in, and stay on Today until a "Call completed" reply. Only rescheduled jobs show a clock time, since intake calendar times are just when the call arrived. If the thread and calendar disagree on the day, the card shows a ⚠️ warning.
+Today shows only that day's jobs: ones booked for today and new calls that came in today. Completed jobs stay on Today with a ✅ and drop off the next day. Open calls from the last 7 days are under *All open*. Only rescheduled jobs show a clock time, since intake calendar times are just when the call arrived. If the thread and calendar disagree on the day, the card shows a ⚠️ warning.
 
 The app only reads. It never posts in channels or edits the calendar. Data refreshes every 2 minutes.
 

@@ -42,8 +42,8 @@ function fmtTime(job, now = new Date()) {
 
 const CARRY_DAYS = Number(process.env.CARRY_OVER_DAYS || 7);
 
-// A call from an earlier day that was never completed is still today's work. Only calls with an
-// #incoming-calls thread qualify, since that's where "Call completed" shows up.
+// A call from the last few days that was never completed shows under All open. Only calls with an
+// #incoming-calls thread qualify, since otherwise nothing could ever mark them done.
 function carriedOver(job, today) {
   if (job.status === 'done' || !job.when || !job.threadTs) return false;
   const day = dayKey(job.when);
@@ -58,7 +58,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
   let list = jobs.filter((j) => {
     const day = j.when ? dayKey(j.when) : null;
     switch (tab) {
-      case 'today': return day === today || carriedOver(j, today);
+      case 'today': return day === today;
       case 'tomorrow': return day === tomorrow;
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
       case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today));
@@ -69,8 +69,8 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
   if (tech === 'unassigned') list = list.filter((j) => !j.tech);
   else if (tech !== 'all') list = list.filter((j) => j.tech === tech);
   if (tab === 'today') {
-    // Timed visits first in time order, then today's new calls, then older open calls.
-    const rank = (j) => (carriedOver(j, today) ? 2 : j.timed ? 0 : 1);
+    // Booked times in time order, then today's new calls.
+    const rank = (j) => (j.timed ? 0 : 1);
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
   }
   if (tab === 'recent') list.sort((a, b) => (b.when || 0) - (a.when || 0));
@@ -89,6 +89,7 @@ function jobBlocks(job) {
 
   const buttons = [
     threadUrl(job) && button('Thread', threadUrl(job), `thread_${job.jobNumber}`),
+    job.assignedMessageUrl && button('Tech chat', job.assignedMessageUrl, `techmsg_${job.jobNumber}`),
     job.filesUrl && button('Files', job.filesUrl, `files_${job.jobNumber}`),
     mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
     job.calendarLink && button('Calendar', job.calendarLink, `cal_${job.jobNumber}`),
@@ -163,7 +164,7 @@ function boardBlocks(store, filters) {
   let lastGroup = null;
   for (const job of jobs.slice(0, MAX_JOBS)) {
     if (filters.tab === 'today') {
-      const group = carriedOver(job, today) ? '⏳ Still open from earlier days' : job.timed ? '📅 Booked times' : '🆕 Today\'s calls';
+      const group = job.timed ? '📅 Booked times' : '🆕 Today\'s calls';
       if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
       lastGroup = group;
     }

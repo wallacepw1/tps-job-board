@@ -1,6 +1,7 @@
 // Builds the job list by joining TPS Jobs calendar events with #incoming-calls threads.
 const ical = require('node-ical');
 const { parseIntake, parseReplies, statusOf, messageText } = require('./parse');
+const { fetchCallsList } = require('./calls-list');
 
 const TZ = process.env.TZ_NAME || 'America/Los_Angeles';
 const CHANNEL_ID = process.env.INCOMING_CHANNEL_ID || 'C0C19TG3KJ6';
@@ -54,7 +55,9 @@ class JobStore {
   }
 
   async refresh() {
-    const [events, posts, future] = await Promise.all([fetchEvents(), this.fetchPosts(), this.fetchFutureCalls()]);
+    const [events, posts, future, calls] = await Promise.all([
+      fetchEvents(), this.fetchPosts(), this.fetchFutureCalls(), this.fetchCalls(),
+    ]);
 
     const byNumber = new Map();
     for (const post of posts) {
@@ -89,6 +92,16 @@ class JobStore {
       byNumber.set(num, job);
     }
 
+    // The Calls list says who is assigned and whether the job is completed.
+    for (const [num, row] of calls) {
+      const job = byNumber.get(num);
+      if (!job) continue; // only jobs that are on the calendar or in #incoming-calls
+      if (row.assigneeId) job.tech = await this.userName(row.assigneeId);
+      if (row.completed) job.completed = true;
+      job.assignedMessageUrl = row.assignedMessageUrl;
+      job.workDone = row.workDone;
+    }
+
     this.jobs = [...byNumber.values()].map(finalize).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
     this.updatedAt = new Date();
     this.stats = {
@@ -97,6 +110,8 @@ class JobStore {
       incomingPosts: posts.length,
       futureCalls: future.size,
       futureError: this.futureError || null,
+      callsListRows: calls.size,
+      callsListError: this.callsError || null,
       jobs: this.jobs.length,
       withThread: this.jobs.filter((j) => j.threadTs).length,
       withTech: this.jobs.filter((j) => j.tech).length,
@@ -142,6 +157,30 @@ class JobStore {
       console.error('could not read #future-calls (is the bot invited?)', this.futureError);
     }
     return found;
+  }
+
+  async fetchCalls() {
+    this.callsError = null;
+    try {
+      return await fetchCallsList(this.slack);
+    } catch (e) {
+      this.callsError = e.data?.error || e.message;
+      console.error('could not read the Calls list', this.callsError);
+      return new Map();
+    }
+  }
+
+  async userName(id) {
+    this.names = this.names || new Map();
+    if (!this.names.has(id)) {
+      try {
+        const { user } = await this.slack.users.info({ user: id });
+        this.names.set(id, user.profile?.display_name || user.real_name || user.name);
+      } catch {
+        this.names.set(id, null);
+      }
+    }
+    return this.names.get(id);
   }
 
   // Thread replies are only re-read when the thread has new activity.
