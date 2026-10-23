@@ -13,7 +13,7 @@ Each card shows the job #, client, address, issue, status, time and tech, with b
 | Data | Source |
 | --- | --- |
 | Job details (client, address, issue, Drive folder) | PaulLatenode intake post in #incoming-calls, or the calendar event description |
-| Appointment time | TPS Jobs Google Calendar, overridden by a "Scheduled for…" / "Rescheduled:…" reply in the thread |
+| Appointment time | The job's latest post in #future-calls ("The call is Scheduled for…"), then a "Rescheduled:…" reply in the thread, then the TPS Jobs calendar |
 | Tech | "Call assigned to *Name*" reply in the thread |
 | Done | "Call completed" reply in the thread |
 
@@ -27,7 +27,7 @@ The app only reads. It never posts in channels or edits the calendar. Data refre
 2. **Slack app.** api.slack.com/apps → Create New App → From a manifest → TPS workspace → paste `manifest.yml`. Install it, then copy the **Bot User OAuth Token** (`xoxb-…`) and, under Basic Information, the **Signing Secret**.
 3. **Render.** New → Blueprint → pick this repo. Fill in `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `CALENDAR_ICS_URL`.
 4. **Check the URL.** The manifest assumes Render serves the app at `tps-job-board.onrender.com`. If Render picks a different URL, change the three URLs in the app's manifest in Slack to match.
-5. **Invite the bot** to #incoming-calls: `/invite @TPS Job Board`.
+5. **Invite the bot** to #incoming-calls and #future-calls: `/invite @TPS Job Board` in each.
 
 ## Development
 

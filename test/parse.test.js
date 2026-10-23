@@ -83,3 +83,16 @@ test('reads the Rescheduled reply format', () => {
   ]);
   assert.deepEqual(s.scheduledFor, { date: '2026-10-23', time: '14:00' });
 });
+
+test('reads a #future-calls post as the schedule for that job', () => {
+  const { addFuture } = require('../src/jobs');
+  const found = new Map();
+  addFuture(found, {
+    ts: '1792718000.000000',
+    text: 'TORREY PINES PROPERTY MGMT, INC.\n\nBN-San Remo Court - 16\n540 Naples Street\nUnit 16\nChula Vista, CA 91911\n\nKitchen sink faucet is leaking and needs replacement.\n\nWORK ORDER/MEDIA\n https://drive.google.com/drive/folders/1ipBLB2p84wp2V8ABiLKGFHXJatZxKMWQ\n132118\n385138-1\nRec0CAR7MA8F2\n1792178561.478429\n<https://drive.google.com/drive/folders/1ipBLB2p84wp2V8ABiLKGFHXJatZxKMWQ|Work Order Files>\n*The call is Scheduled for Monday, Oct 26 at 9:00 AM*\nEduardo button\nReschedule button',
+  });
+  const f = found.get('132118');
+  assert.deepEqual(f.scheduledFor, { date: '2026-10-26', time: '09:00' });
+  assert.equal(f.threadTs, '1792178561.478429');
+  assert.equal(f.intake.client, 'TORREY PINES PROPERTY MGMT, INC.');
+});

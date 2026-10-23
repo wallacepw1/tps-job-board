@@ -4,6 +4,8 @@ const { parseIntake, parseReplies, statusOf } = require('./parse');
 
 const TZ = process.env.TZ_NAME || 'America/Los_Angeles';
 const CHANNEL_ID = process.env.INCOMING_CHANNEL_ID || 'C0C19TG3KJ6';
+const FUTURE_CHANNEL_ID = process.env.FUTURE_CHANNEL_ID || 'C0C2XB4VD1N';
+const FUTURE_LOOKBACK_DAYS = Number(process.env.FUTURE_LOOKBACK_DAYS || 60);
 const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS || 21);
 const LOOKAHEAD_DAYS = Number(process.env.LOOKAHEAD_DAYS || 14);
 
@@ -52,7 +54,7 @@ class JobStore {
   }
 
   async refresh() {
-    const [events, posts] = await Promise.all([fetchEvents(), this.fetchPosts()]);
+    const [events, posts, future] = await Promise.all([fetchEvents(), this.fetchPosts(), this.fetchFutureCalls()]);
 
     const byNumber = new Map();
     for (const post of posts) {
@@ -78,6 +80,13 @@ class JobStore {
       byNumber.set(num, job);
     }
 
+    // #future-calls is the source of truth for a rescheduled job's day and time.
+    for (const [num, f] of future) {
+      const job = byNumber.get(num) || { ...f.intake, jobNumber: num, threadTs: f.threadTs };
+      job.scheduledFor = f.scheduledFor;
+      byNumber.set(num, job);
+    }
+
     this.jobs = [...byNumber.values()].map(finalize).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
     this.updatedAt = new Date();
     return this.jobs;
@@ -93,6 +102,23 @@ class JobStore {
       cursor = res.response_metadata?.next_cursor;
     } while (cursor);
     return posts;
+  }
+
+  // Latest #future-calls post per job: job # -> { scheduledFor, intake, threadTs }.
+  async fetchFutureCalls() {
+    const found = new Map();
+    const oldest = String(Date.now() / 1000 - FUTURE_LOOKBACK_DAYS * 86400);
+    let cursor;
+    try {
+      do {
+        const res = await this.slack.conversations.history({ channel: FUTURE_CHANNEL_ID, oldest, limit: 200, cursor });
+        for (const m of res.messages) found.has(jobNumberIn(m.text)) || addFuture(found, m);
+        cursor = res.response_metadata?.next_cursor;
+      } while (cursor);
+    } catch (e) {
+      console.error('could not read #future-calls (is the bot invited?)', e.data?.error || e.message);
+    }
+    return found;
   }
 
   // Thread replies are only re-read when the thread has new activity.
@@ -113,6 +139,21 @@ class JobStore {
   techs() {
     return [...new Set(this.jobs.map((j) => j.tech).filter(Boolean))].sort();
   }
+}
+
+function jobNumberIn(text) {
+  return (text || '').match(/^\s*(\d{5,7})\s*$/m)?.[1] || null;
+}
+
+function addFuture(found, msg) {
+  const num = jobNumberIn(msg.text);
+  const { scheduledFor } = parseReplies([{ text: msg.text, ts: msg.ts }]);
+  if (!num || !scheduledFor) return;
+  const intake = parseIntake(msg.text);
+  // Future-calls posts can lead with the client name instead of the job number.
+  if (!intake.jobNumber) intake.client = msg.text.trim().split('\n')[0].trim();
+  const threadTs = msg.text.match(/^\s*(\d{10}\.\d{6})\s*$/m)?.[1] || null;
+  found.set(num, { scheduledFor, intake, threadTs });
 }
 
 // New calls are treated as work for the day they came in, and their clock time is not meaningful.
@@ -156,4 +197,4 @@ function zonedDate(date, time) {
   return new Date(guess.getTime() + (guess - local));
 }
 
-module.exports = { JobStore, dayKey, isIntakePlaceholder, zonedDate, TZ };
+module.exports = { JobStore, addFuture, dayKey, isIntakePlaceholder, zonedDate, TZ };
