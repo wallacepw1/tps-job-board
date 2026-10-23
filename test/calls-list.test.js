@@ -38,3 +38,12 @@ test('matches columns by column id as well as key', () => {
   ]));
   assert.equal(row.completed, true);
 });
+
+test('an unassigned row (after a reschedule) has no tech message', () => {
+  const row = parseListItem(item([
+    { key: COL.name[0], text: '132179' },
+    { key: COL.assigned[0], checkbox: false },
+    { key: COL.assignedMessage[0], message: [{ value: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1' }] },
+  ]));
+  assert.equal(row.assignedMessageUrl, null);
+});

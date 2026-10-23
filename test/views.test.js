@@ -47,3 +47,13 @@ test('intake placeholders are told apart from real appointments', () => {
 test('Slack schedule times are read as San Diego local time', () => {
   assert.equal(zonedDate('2026-10-21', '09:00').toISOString(), '2026-10-21T16:00:00.000Z');
 });
+
+test('shows Future calls until a tech is assigned, then Tech chat', () => {
+  const { jobBlocks } = require('../src/views');
+  const buttons = (job) => jobBlocks(job)[2].elements.map((e) => e.text.text);
+  const waiting = { jobNumber: '132180', status: 'scheduled', futureTs: '1792712542.021789' };
+  assert.ok(buttons(waiting).includes('Future calls'));
+  const assigned = { ...waiting, assignedMessageUrl: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1792691395739399' };
+  assert.ok(buttons(assigned).includes('Tech chat'));
+  assert.ok(!buttons(assigned).includes('Future calls'));
+});

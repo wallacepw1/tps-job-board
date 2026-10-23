@@ -89,6 +89,7 @@ class JobStore {
     for (const [num, f] of future) {
       const job = byNumber.get(num) || { ...f.intake, jobNumber: num, threadTs: f.threadTs };
       job.scheduledFor = f.scheduledFor;
+      job.futureTs = f.futureTs;
       byNumber.set(num, job);
     }
 
@@ -223,7 +224,7 @@ function addFuture(found, msg) {
   // Future-calls posts can lead with the client name instead of the job number.
   if (!intake.jobNumber) intake.client = msg.text.trim().split('\n')[0].trim();
   const threadTs = msg.text.match(/^\s*(\d{10}\.\d{6})\s*$/m)?.[1] || null;
-  found.set(num, { scheduledFor, intake, threadTs });
+  found.set(num, { scheduledFor, intake, threadTs, futureTs: msg.ts });
 }
 
 // New calls are treated as work for the day they came in, and their clock time is not meaningful.

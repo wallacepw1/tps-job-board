@@ -70,7 +70,7 @@ app.action('refresh', async ({ ack, body, client }) => {
 });
 
 // Link buttons still send an action; acknowledge them so Slack shows no error.
-app.action(/^(thread|techmsg|files|map|cal)_/, async ({ ack }) => ack());
+app.action(/^(thread|techmsg|future|files|map|cal)_/, async ({ ack }) => ack());
 
 app.command('/jobs', async ({ ack, command, client }) => {
   await ack();

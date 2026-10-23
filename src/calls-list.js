@@ -57,13 +57,15 @@ function parseListItem(item) {
   const jobNumber = textOf(f.name).trim().match(/^\d{5,7}$/)?.[0];
   if (!jobNumber) return null;
   const assignee = userOf(f.assignee);
+  const isAssigned = checked(f.assigned);
   return {
     jobNumber,
     recordId: item.id,
-    assigneeId: checked(f.assigned) && assignee !== OFFICE_USER ? assignee : null,
+    assigneeId: isAssigned && assignee !== OFFICE_USER ? assignee : null,
     completed: checked(f.completed),
     description: textOf(f.description),
-    assignedMessageUrl: messageLink(f.assignedMessage),
+    // A reschedule clears Assigned, so an old tech message no longer counts.
+    assignedMessageUrl: isAssigned ? messageLink(f.assignedMessage) : null,
     workDone: textOf(f.workDone) || null,
   };
 }

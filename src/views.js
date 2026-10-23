@@ -27,6 +27,11 @@ function threadUrl(job) {
   return job.threadTs ? `${workspaceUrl()}/archives/${channel}/p${job.threadTs.replace('.', '')}` : null;
 }
 
+function futureUrl(job) {
+  const channel = process.env.FUTURE_CHANNEL_ID || 'C0C2XB4VD1N';
+  return job.futureTs ? `${workspaceUrl()}/archives/${channel}/p${job.futureTs.replace('.', '')}` : null;
+}
+
 function mapsUrl(job) {
   return job.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.location)}` : null;
 }
@@ -89,7 +94,10 @@ function jobBlocks(job) {
 
   const buttons = [
     threadUrl(job) && button('Thread', threadUrl(job), `thread_${job.jobNumber}`),
-    job.assignedMessageUrl && button('Tech chat', job.assignedMessageUrl, `techmsg_${job.jobNumber}`),
+    // Waiting in #future-calls until a tech is picked; then the tech's channel message takes over.
+    job.assignedMessageUrl
+      ? button('Tech chat', job.assignedMessageUrl, `techmsg_${job.jobNumber}`)
+      : futureUrl(job) && button('Future calls', futureUrl(job), `future_${job.jobNumber}`),
     job.filesUrl && button('Files', job.filesUrl, `files_${job.jobNumber}`),
     mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
     job.calendarLink && button('Calendar', job.calendarLink, `cal_${job.jobNumber}`),
