@@ -1,0 +1,18 @@
+{
+  "name": "tps-job-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only Slack job board for TPS Plumbing, built from the TPS Jobs calendar and #incoming-calls",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.1.0",
+    "node-ical": "^0.20.1"
+  }
+}

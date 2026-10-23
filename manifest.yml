@@ -1,0 +1,39 @@
+# Paste into api.slack.com/apps -> Create New App -> From a manifest. Replace YOUR-APP-URL.
+display_information:
+  name: TPS Job Board
+  description: See every TPS job, who's on it, and when, from anywhere in Slack.
+  background_color: "#1d4f91"
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+  bot_user:
+    display_name: TPS Job Board
+    always_online: true
+  shortcuts:
+    - name: Open job board
+      type: global
+      callback_id: open_job_board
+      description: Show today's jobs
+  slash_commands:
+    - command: /jobs
+      url: https://YOUR-APP-URL/slack/events
+      description: Open the job board, or look up one job
+      usage_hint: "[job # | tech name]"
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - channels:read
+      - commands
+      - chat:write
+settings:
+  event_subscriptions:
+    request_url: https://YOUR-APP-URL/slack/events
+    bot_events:
+      - app_home_opened
+  interactivity:
+    is_enabled: true
+    request_url: https://YOUR-APP-URL/slack/events
+  org_deploy_enabled: false
+  socket_mode_enabled: false
