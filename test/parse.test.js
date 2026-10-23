@@ -96,3 +96,13 @@ test('reads a #future-calls post as the schedule for that job', () => {
   assert.equal(f.threadTs, '1792178561.478429');
   assert.equal(f.intake.client, 'TORREY PINES PROPERTY MGMT, INC.');
 });
+
+test('reads job text from blocks when the message text is only a fallback', () => {
+  const { messageText } = require('../src/parse');
+  const text = messageText({
+    text: 'New service call',
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: FAIRGROVE } }],
+  });
+  assert.match(text, /^132174$/m);
+  assert.equal(messageText({ text: FAIRGROVE, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: FAIRGROVE } }] }), FAIRGROVE);
+});

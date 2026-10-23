@@ -1,6 +1,6 @@
 // Builds the job list by joining TPS Jobs calendar events with #incoming-calls threads.
 const ical = require('node-ical');
-const { parseIntake, parseReplies, statusOf } = require('./parse');
+const { parseIntake, parseReplies, statusOf, messageText } = require('./parse');
 
 const TZ = process.env.TZ_NAME || 'America/Los_Angeles';
 const CHANNEL_ID = process.env.INCOMING_CHANNEL_ID || 'C0C19TG3KJ6';
@@ -59,7 +59,8 @@ class JobStore {
     const byNumber = new Map();
     for (const post of posts) {
       const intake = parseIntake(post.text);
-      if (!intake.jobNumber) continue;
+      intake.jobNumber = intake.jobNumber || jobNumberIn(post.text);
+      if (!intake.jobNumber || byNumber.has(intake.jobNumber)) continue; // newest post wins
       const state = await this.threadState(post);
       byNumber.set(intake.jobNumber, {
         ...intake,
@@ -74,8 +75,9 @@ class JobStore {
       const num = (ev.summary || '').match(/\b(\d{5,7})\b/)?.[1];
       if (!num) continue;
       const job = byNumber.get(num) || { ...parseIntake(ev.description || ''), jobNumber: num };
-      // Several events can share a job number; prefer a real appointment over an intake placeholder.
-      if (job.event && !isIntakePlaceholder(job.event) && isIntakePlaceholder(ev)) continue;
+      // Several events can share a job number; prefer a real appointment over an intake placeholder,
+      // and among real appointments the latest one (a return visit or a move).
+      if (job.event && !preferEvent(ev, job.event)) continue;
       job.event = ev;
       byNumber.set(num, job);
     }
@@ -89,6 +91,18 @@ class JobStore {
 
     this.jobs = [...byNumber.values()].map(finalize).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
     this.updatedAt = new Date();
+    this.stats = {
+      updatedAt: this.updatedAt,
+      calendarEvents: events.length,
+      incomingPosts: posts.length,
+      futureCalls: future.size,
+      futureError: this.futureError || null,
+      jobs: this.jobs.length,
+      withThread: this.jobs.filter((j) => j.threadTs).length,
+      withTech: this.jobs.filter((j) => j.tech).length,
+      done: this.jobs.filter((j) => j.status === 'done').length,
+    };
+    console.log('refreshed', JSON.stringify(this.stats));
     return this.jobs;
   }
 
@@ -98,7 +112,11 @@ class JobStore {
     let cursor;
     do {
       const res = await this.slack.conversations.history({ channel: CHANNEL_ID, oldest, limit: 200, cursor });
-      posts.push(...res.messages.filter((m) => m.bot_id && /^\s*\d{5,7}\s*\n/.test(m.text || '')));
+      // Latenode posts can carry their content in blocks or attachments rather than `text`.
+      for (const m of res.messages) {
+        const text = messageText(m);
+        if (jobNumberIn(text)) posts.push({ ...m, text });
+      }
       cursor = res.response_metadata?.next_cursor;
     } while (cursor);
     return posts;
@@ -107,16 +125,21 @@ class JobStore {
   // Latest #future-calls post per job: job # -> { scheduledFor, intake, threadTs }.
   async fetchFutureCalls() {
     const found = new Map();
+    this.futureError = null;
     const oldest = String(Date.now() / 1000 - FUTURE_LOOKBACK_DAYS * 86400);
     let cursor;
     try {
       do {
         const res = await this.slack.conversations.history({ channel: FUTURE_CHANNEL_ID, oldest, limit: 200, cursor });
-        for (const m of res.messages) found.has(jobNumberIn(m.text)) || addFuture(found, m);
+        for (const m of res.messages) {
+          const msg = { ...m, text: messageText(m) };
+          if (!found.has(jobNumberIn(msg.text))) addFuture(found, msg);
+        }
         cursor = res.response_metadata?.next_cursor;
       } while (cursor);
     } catch (e) {
-      console.error('could not read #future-calls (is the bot invited?)', e.data?.error || e.message);
+      this.futureError = e.data?.error || e.message;
+      console.error('could not read #future-calls (is the bot invited?)', this.futureError);
     }
     return found;
   }
@@ -127,7 +150,7 @@ class JobStore {
     const cached = this.threadCache.get(post.ts);
     if (cached && cached.latestReply === post.latest_reply) return cached.state;
     const res = await this.slack.conversations.replies({ channel: CHANNEL_ID, ts: post.ts, limit: 200 });
-    const state = parseReplies((res.messages || []).slice(1));
+    const state = parseReplies((res.messages || []).slice(1).map((m) => ({ ts: m.ts, text: messageText(m) })));
     this.threadCache.set(post.ts, { latestReply: post.latest_reply, state });
     return state;
   }
@@ -139,6 +162,14 @@ class JobStore {
   techs() {
     return [...new Set(this.jobs.map((j) => j.tech).filter(Boolean))].sort();
   }
+}
+
+function preferEvent(ev, current) {
+  const evReal = !isIntakePlaceholder(ev);
+  const curReal = !isIntakePlaceholder(current);
+  if (evReal !== curReal) return evReal;
+  const start = (e) => new Date(e.start.dateTime || e.start.date);
+  return start(ev) > start(current);
 }
 
 function jobNumberIn(text) {
@@ -197,4 +228,4 @@ function zonedDate(date, time) {
   return new Date(guess.getTime() + (guess - local));
 }
 
-module.exports = { JobStore, addFuture, dayKey, isIntakePlaceholder, zonedDate, TZ };
+module.exports = { JobStore, addFuture, preferEvent, jobNumberIn, dayKey, isIntakePlaceholder, zonedDate, TZ };

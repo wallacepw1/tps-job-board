@@ -7,6 +7,7 @@ const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
 const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_SECRET });
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
+receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
 const store = new JobStore(app.client);

@@ -11,6 +11,24 @@ function clean(text) {
     .replace(/&gt;/g, '>');
 }
 
+// Full readable text of a Slack message: `text` plus anything in blocks and attachments.
+function messageText(m) {
+  const collect = (node, out) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { node.forEach((n) => collect(n, out)); return out; }
+    if (typeof node.text === 'string') out.push(node.text);
+    if (node.type === 'link' && node.url) out.push(node.url);
+    for (const key of ['text', 'elements', 'fields', 'blocks']) if (typeof node[key] === 'object') collect(node[key], out);
+    return out;
+  };
+  const attachments = (m.attachments || []).flatMap((a) => [
+    a.pretext, a.title, a.text, ...(a.fields || []).map((f) => `${f.title || ''}\n${f.value || ''}`), ...collect(a.blocks, []),
+  ]);
+  // Blocks usually repeat `text`, so use whichever version carries the most.
+  const candidates = [m.text || '', collect(m.blocks, []).join('\n'), attachments.filter(Boolean).join('\n')];
+  return candidates.reduce((best, c) => (c.length > best.length ? c : best), '');
+}
+
 function parseIntake(rawText) {
   const text = clean(rawText);
   const lines = text.split('\n').map((l) => l.trim());
@@ -103,4 +121,4 @@ function statusOf(job) {
   return 'new';
 }
 
-module.exports = { parseIntake, parseReplies, statusOf, clean };
+module.exports = { parseIntake, parseReplies, statusOf, clean, messageText };

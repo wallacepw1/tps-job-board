@@ -40,9 +40,14 @@ function fmtTime(job, now = new Date()) {
   return isToday ? `Came in ${clock(job.when)}` : `Open since ${day(job.when)}`;
 }
 
-// A call that was never rescheduled or completed is still today's work.
+const CARRY_DAYS = Number(process.env.CARRY_OVER_DAYS || 7);
+
+// A call from an earlier day that was never completed is still today's work. Only calls with an
+// #incoming-calls thread qualify, since that's where "Call completed" shows up.
 function carriedOver(job, today) {
-  return !job.timed && job.status !== 'done' && job.when && dayKey(job.when) < today;
+  if (job.status === 'done' || !job.when || !job.threadTs) return false;
+  const day = dayKey(job.when);
+  return day < today && Date.now() - job.when < CARRY_DAYS * 864e5;
 }
 
 function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
@@ -56,7 +61,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
       case 'today': return day === today || carriedOver(j, today);
       case 'tomorrow': return day === tomorrow;
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
-      case 'open': return j.status !== 'done';
+      case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today));
       case 'recent': return j.status === 'done' && (j.when || j.postedAt || 0) >= weekAgo;
       default: return true;
     }
@@ -65,7 +70,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
   else if (tech !== 'all') list = list.filter((j) => j.tech === tech);
   if (tab === 'today') {
     // Timed visits first in time order, then today's new calls, then older open calls.
-    const rank = (j) => (j.timed ? 0 : carriedOver(j, today) ? 2 : 1);
+    const rank = (j) => (carriedOver(j, today) ? 2 : j.timed ? 0 : 1);
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
   }
   if (tab === 'recent') list.sort((a, b) => (b.when || 0) - (a.when || 0));
@@ -158,7 +163,7 @@ function boardBlocks(store, filters) {
   let lastGroup = null;
   for (const job of jobs.slice(0, MAX_JOBS)) {
     if (filters.tab === 'today') {
-      const group = job.timed ? '📅 Booked times' : carriedOver(job, today) ? '⏳ Still open from earlier days' : '🆕 Today\'s calls';
+      const group = carriedOver(job, today) ? '⏳ Still open from earlier days' : job.timed ? '📅 Booked times' : '🆕 Today\'s calls';
       if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
       lastGroup = group;
     }
