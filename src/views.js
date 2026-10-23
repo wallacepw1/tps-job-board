@@ -12,11 +12,11 @@ const TABS = [
   { id: 'today', label: 'Today' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'week', label: 'This week' },
-  { id: 'unscheduled', label: 'Needs scheduling' },
+  { id: 'open', label: 'All open' },
   { id: 'recent', label: 'Done (7 days)' },
 ];
 
-const MAX_JOBS = 30; // Slack allows 100 blocks per view; each job uses 3.
+const MAX_JOBS = 28; // Slack allows 100 blocks per view; each job uses 3, plus headers.
 
 function workspaceUrl() {
   return process.env.SLACK_WORKSPACE_URL || 'https://tpsplumbing.slack.com';
@@ -31,11 +31,18 @@ function mapsUrl(job) {
   return job.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.location)}` : null;
 }
 
-function fmtTime(job) {
-  if (!job.when) return 'Not scheduled';
-  const opts = { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric' };
-  if (!job.allDay) Object.assign(opts, { hour: 'numeric', minute: '2-digit' });
-  return new Intl.DateTimeFormat('en-US', opts).format(job.when);
+function fmtTime(job, now = new Date()) {
+  if (!job.when) return 'No date';
+  const day = (d) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric' }).format(d);
+  const clock = (d) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(d);
+  const isToday = dayKey(job.when) === dayKey(now);
+  if (job.timed) return isToday ? clock(job.when) : `${day(job.when)} ${clock(job.when)}`;
+  return isToday ? `Came in ${clock(job.when)}` : `Open since ${day(job.when)}`;
+}
+
+// A call that was never rescheduled or completed is still today's work.
+function carriedOver(job, today) {
+  return !job.timed && job.status !== 'done' && job.when && dayKey(job.when) < today;
 }
 
 function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
@@ -46,17 +53,22 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
   let list = jobs.filter((j) => {
     const day = j.when ? dayKey(j.when) : null;
     switch (tab) {
-      case 'today': return day === today;
+      case 'today': return day === today || carriedOver(j, today);
       case 'tomorrow': return day === tomorrow;
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
-      case 'unscheduled': return !j.when && j.status !== 'done';
+      case 'open': return j.status !== 'done';
       case 'recent': return j.status === 'done' && (j.when || j.postedAt || 0) >= weekAgo;
       default: return true;
     }
   });
   if (tech === 'unassigned') list = list.filter((j) => !j.tech);
   else if (tech !== 'all') list = list.filter((j) => j.tech === tech);
-  if (tab === 'unscheduled' || tab === 'recent') list.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
+  if (tab === 'today') {
+    // Timed visits first in time order, then today's new calls, then older open calls.
+    const rank = (j) => (j.timed ? 0 : carriedOver(j, today) ? 2 : 1);
+    list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
+  }
+  if (tab === 'recent') list.sort((a, b) => (b.when || 0) - (a.when || 0));
   return list;
 }
 
@@ -101,11 +113,11 @@ function truncate(s, n) {
 }
 
 function summary(jobs, now = new Date()) {
-  const today = dayKey(now);
-  const todays = jobs.filter((j) => j.when && dayKey(j.when) === today);
-  const count = (s) => todays.filter((j) => j.status === s).length;
-  const backlog = jobs.filter((j) => !j.when && j.status !== 'done').length;
-  return `*Today:* ${todays.length} jobs  ·  📅 ${count('scheduled') + count('assigned')} to go  ·  ✅ ${count('done')} done  ·  🗂️ ${backlog} need scheduling`;
+  const todays = filterJobs(jobs, { tab: 'today', tech: 'all' }, now);
+  const open = todays.filter((j) => j.status !== 'done');
+  const done = todays.length - open.length;
+  const unassigned = open.filter((j) => !j.tech).length;
+  return `*Today:* ${open.length} to do  ·  👷 ${unassigned} unassigned  ·  ✅ ${done} done`;
 }
 
 function boardBlocks(store, filters) {
@@ -142,7 +154,16 @@ function boardBlocks(store, filters) {
   if (!jobs.length) {
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '_No jobs here._' } });
   }
-  for (const job of jobs.slice(0, MAX_JOBS)) blocks.push(...jobBlocks(job));
+  const today = dayKey(new Date());
+  let lastGroup = null;
+  for (const job of jobs.slice(0, MAX_JOBS)) {
+    if (filters.tab === 'today') {
+      const group = job.timed ? '📅 Booked times' : carriedOver(job, today) ? '⏳ Still open from earlier days' : '🆕 Today\'s calls';
+      if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
+      lastGroup = group;
+    }
+    blocks.push(...jobBlocks(job));
+  }
   if (jobs.length > MAX_JOBS) {
     blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${jobs.length - MAX_JOBS} more. Filter by tech to narrow the list.` }] });
   }

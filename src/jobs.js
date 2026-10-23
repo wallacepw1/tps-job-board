@@ -115,24 +115,29 @@ class JobStore {
   }
 }
 
+// New calls are treated as work for the day they came in, and their clock time is not meaningful.
+// Only a reschedule (or a calendar event someone moved) gives a time worth showing.
 function finalize(job) {
   const ev = job.event;
   const realAppointment = ev && !isIntakePlaceholder(ev);
   let when = null;
-  let allDay = false;
+  let timed = false;
   if (job.scheduledFor) {
     when = zonedDate(job.scheduledFor.date, job.scheduledFor.time);
+    timed = true;
   } else if (realAppointment) {
-    allDay = !ev.start.dateTime;
+    timed = Boolean(ev.start.dateTime);
     when = new Date(ev.start.dateTime || `${ev.start.date}T08:00:00`);
+  } else {
+    when = job.postedAt || (ev && new Date(ev.start.dateTime || ev.start.date)) || null;
   }
   const calendarDay = realAppointment ? dayKey(new Date(ev.start.dateTime || ev.start.date)) : null;
   const mismatch = job.scheduledFor && calendarDay && calendarDay !== job.scheduledFor.date;
-  const status = statusOf({ ...job, scheduledFor: job.scheduledFor || (realAppointment ? true : null) });
+  const status = statusOf({ ...job, scheduledFor: timed || null });
   return {
     ...job,
     when,
-    allDay,
+    timed,
     status,
     mismatch: Boolean(mismatch),
     calendarLink: ev?.htmlLink || null,

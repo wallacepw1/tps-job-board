@@ -6,17 +6,18 @@ const { isIntakePlaceholder, zonedDate, dayKey } = require('../src/jobs');
 const now = new Date();
 const today = dayKey(now);
 const jobs = [
-  { jobNumber: '132174', client: 'Fairgrove Property Management', location: '2446 Brant St, San Diego, CA 92101', issue: 'Drain/Pipe Clog', status: 'scheduled', tech: 'Eduardo', when: zonedDate(today, '09:00'), threadTs: '1792690044.863279' },
-  { jobNumber: '132179', client: 'Fairgrove Property Management', issue: 'Toilet running', status: 'new', when: null, postedAt: now },
-  { jobNumber: '132162', status: 'done', tech: 'Eduardo', when: new Date(now - 864e5) },
+  { jobNumber: '132174', client: 'Fairgrove Property Management', location: '2446 Brant St, San Diego, CA 92101', issue: 'Drain/Pipe Clog', status: 'scheduled', tech: 'Eduardo', when: zonedDate(today, '09:00'), timed: true, threadTs: '1792690044.863279' },
+  { jobNumber: '132181', client: 'Fairgrove Property Management', issue: 'Drain clog', status: 'new', when: now, timed: false },
+  { jobNumber: '132179', client: 'Fairgrove Property Management', issue: 'Toilet running', status: 'new', when: new Date(now - 2 * 864e5), timed: false },
+  { jobNumber: '132162', status: 'done', tech: 'Eduardo', when: new Date(now - 864e5), timed: false },
 ];
 const store = { jobs, techs: () => ['Eduardo'], updatedAt: now };
 
 test('tabs split jobs by day and status', () => {
-  assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' }).map((j) => j.jobNumber), ['132174']);
-  assert.deepEqual(filterJobs(jobs, { tab: 'unscheduled', tech: 'all' }).map((j) => j.jobNumber), ['132179']);
+  // Today = booked times, then today's calls, then older calls still open; finished ones drop off.
+  assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' }).map((j) => j.jobNumber), ['132174', '132181', '132179']);
+  assert.deepEqual(filterJobs(jobs, { tab: 'open', tech: 'unassigned' }).map((j) => j.jobNumber), ['132181', '132179']);
   assert.deepEqual(filterJobs(jobs, { tab: 'recent', tech: 'all' }).map((j) => j.jobNumber), ['132162']);
-  assert.deepEqual(filterJobs(jobs, { tab: 'unscheduled', tech: 'unassigned' }).map((j) => j.jobNumber), ['132179']);
 });
 
 test('home view stays within Slack block limits', () => {

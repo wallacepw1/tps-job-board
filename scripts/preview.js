@@ -4,7 +4,7 @@ const { zonedDate } = require('../src/jobs');
 
 const d = '2026-10-23';
 const job = (jobNumber, client, location, issue, time, extra = {}) => ({
-  jobNumber, client, location, issue, when: zonedDate(d, time), status: 'scheduled', ...extra,
+  jobNumber, client, location, issue, when: zonedDate(d, time), timed: true, status: 'scheduled', ...extra,
 });
 const jobs = [
   job('132179', 'Fairgrove Property Management', '4985 Elsa Rd, San Diego, CA 92120', 'Toilet Is Running Continuously', '09:00', { workOrder: '260995-1', threadTs: '1792711637.429499', filesUrl: 'https://drive.google.com/drive/folders/1As0FYVrBcTXJABht8RBOBJ1qag_NB2tj' }),
@@ -14,7 +14,8 @@ const jobs = [
   job('131842', 'Fairgrove Property Management', '4037 Winona Avenue #5, San Diego, CA 92105', 'Kitchen sink hose leaking; no hot water at shower', '11:00', { workOrder: '254958-1' }),
   job('132177', 'Beyond Property Management', '4346 38th St., San Diego, CA 92105', 'Water Heater (no hot water, tenant marked urgent)', '14:00', { workOrder: '33580-1', threadTs: '1792706570.836179', filesUrl: 'https://drive.google.com/drive/folders/1JBdH0NGkbaFmHpUwX8HYQw2KvCT4qTM6' }),
   job('132180', 'Beyond Property Management', '7987 Lincoln St., Lemon Grove, CA 91945', 'Install dishwasher air gap and shut-off', '14:00', { workOrder: '33583-1', threadTs: '1792712542.021789', filesUrl: 'https://drive.google.com/drive/folders/1fzxdv2yz9OELQN-aUyRij7KwuGnJUjYl' }),
-  { jobNumber: '132181', client: 'Fairgrove Property Management', location: '9928 Buena Vista Dr, Spring Valley, CA 91977', issue: 'Drain/Pipe Clog (sewage backing up)', status: 'new', when: null, postedAt: new Date() },
+  { jobNumber: '132181', client: 'Fairgrove Property Management', location: '9928 Buena Vista Dr, Spring Valley, CA 91977', issue: 'Drain/Pipe Clog (sewage backing up)', status: 'new', when: zonedDate(d, '07:22'), timed: false },
+  { jobNumber: '132176', client: 'Dinorah Soriano', location: '311 F Street, Suite 101, Chula Vista, CA', issue: 'Leaking water heater, bypass and remove', status: 'new', when: zonedDate('2026-10-22', '13:28'), timed: false },
 ];
 const store = { jobs, techs: () => ['Edgar', 'Eduardo', 'Esteban'], updatedAt: new Date() };
 const view = homeView(store, { tab: 'today', tech: 'all' });
