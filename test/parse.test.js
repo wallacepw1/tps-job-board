@@ -119,3 +119,9 @@ test('reads text inside Latenode container blocks', () => {
   assert.match(text, /^132181$/m);
   assert.match(text, /Fairgrove/);
 });
+
+test('keeps the street when a unit line sits between street and city', () => {
+  const j = parseIntake('132182\n385856-1\nTORREY PINES PROPERTY MGMT, INC.\n\nROY - The Royal Apartments - 626-03\n626 East 24th Street\nUnit 3\nNational City, CA 91950\n\nA lot of water is still coming out of the top in the bathroom.');
+  assert.equal(j.address, '626 East 24th Street, Unit 3, National City, CA 91950');
+  assert.match(j.issue, /^A lot of water/);
+});

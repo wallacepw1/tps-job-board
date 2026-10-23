@@ -45,15 +45,19 @@ function parseIntake(rawText) {
     || rawText.match(/(https:\/\/drive\.google\.com\/drive\/folders\/[\w-]+)/);
   const filesUrl = driveMatch ? driveMatch[1] : null;
 
-  // Address: the line containing ", CA", plus the street line just above it.
+  // Address: the line containing ", CA", plus the street line above it and any unit line in between.
   let address = null;
   let addressIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     if (ADDRESS_LINE.test(lines[i])) {
       addressIdx = i;
-      const street = lines[i - 1] && /^\d/.test(lines[i - 1]) ? lines[i - 1] : null;
-      address = street ? `${street}, ${lines[i]}` : lines[i];
-      if (!/^\d/.test(address) && lines[i - 1]) address = `${lines[i - 1]}, ${lines[i]}`;
+      const above = [];
+      for (let j = i - 1; j >= Math.max(0, i - 3) && lines[j]; j--) {
+        above.unshift(lines[j]);
+        if (/^\d/.test(lines[j])) break;
+      }
+      const hasStreet = above.length && /^\d/.test(above[0]);
+      address = [...(hasStreet ? above : above.slice(-1)), lines[i]].join(', ');
       break;
     }
   }
