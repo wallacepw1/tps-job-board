@@ -219,6 +219,9 @@ function jobNumberIn(text) {
 function addFuture(found, msg) {
   const num = jobNumberIn(msg.text);
   const { scheduledFor } = parseReplies([{ text: msg.text, ts: msg.ts }]);
+  if (num && !scheduledFor) {
+    console.warn(`future-calls post for ${num} has no schedule I can read:`, JSON.stringify({ text: msg.text?.slice(-300) }));
+  }
   if (!num || !scheduledFor) return;
   const intake = parseIntake(msg.text);
   // Future-calls posts can lead with the client name instead of the job number.

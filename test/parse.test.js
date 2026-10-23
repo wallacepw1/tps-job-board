@@ -125,3 +125,14 @@ test('keeps the street when a unit line sits between street and city', () => {
   assert.equal(j.address, '626 East 24th Street, Unit 3, National City, CA 91950');
   assert.match(j.issue, /^A lot of water/);
 });
+
+test('reads schedule dates stored as Slack date tokens or rich-text dates', () => {
+  const { messageText } = require('../src/parse');
+  // 1792771200 = 2026-10-23 09:00 in San Diego
+  const token = messageText({ text: '131898\n*The call is Scheduled for <!date^1792771200^{date_num} at {time}|2026-10-23 at 09:00>*' });
+  assert.deepEqual(parseReplies([{ text: token }]).scheduledFor, { date: '2026-10-23', time: '09:00' });
+  const rich = messageText({ text: '', blocks: [{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [
+    { type: 'text', text: '131898\nThe call is Scheduled for ' }, { type: 'date', timestamp: 1792771200, format: '{date_num} at {time}' },
+  ] }] }] });
+  assert.deepEqual(parseReplies([{ text: rich }]).scheduledFor, { date: '2026-10-23', time: '09:00' });
+});

@@ -18,6 +18,8 @@ function messageText(m) {
     if (Array.isArray(node)) { node.forEach((n) => collect(n, out)); return out; }
     if (typeof node.text === 'string') out.push(node.text);
     if (node.type === 'link' && node.url) out.push(node.url);
+    // Rich-text dates carry a timestamp instead of text.
+    if (node.type === 'date' && node.timestamp) out.push(node.fallback || formatSlackDate(node.timestamp));
     // Latenode posts use collapsible "container" blocks with a title, subtitle and child_blocks.
     for (const key of ['title', 'subtitle', 'text', 'elements', 'fields', 'blocks', 'child_blocks', 'accessory']) {
       if (typeof node[key] === 'object') collect(node[key], out);
@@ -29,7 +31,16 @@ function messageText(m) {
   ]);
   // Blocks usually repeat `text`, so use whichever version carries the most.
   const candidates = [m.text || '', collect(m.blocks, []).join('\n'), attachments.filter(Boolean).join('\n')];
-  return candidates.reduce((best, c) => (c.length > best.length ? c : best), '');
+  const best = candidates.reduce((b, c) => (c.length > b.length ? c : b), '');
+  // mrkdwn date tokens: <!date^1792761600^{date_short} at {time}|fallback>
+  return best.replace(/<!date\^(\d+)\^[^|>]*(?:\|([^>]*))?>/g, (_, ts, fb) => fb || formatSlackDate(ts));
+}
+
+function formatSlackDate(ts) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.TZ_NAME || 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(Number(ts) * 1000)).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day} at ${parts.hour}:${parts.minute}`;
 }
 
 function parseIntake(rawText) {
@@ -97,9 +108,9 @@ function parseReplies(replies) {
       state.tech = a[1].trim();
       state.assignedAt = a[2];
     }
-    const s = t.match(/Scheduled for (\d{4}-\d{2}-\d{2}) at (\d{1,2}:\d{2})/);
+    const s = t.match(/Scheduled for\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})/);
     if (s) state.scheduledFor = { date: s[1], time: s[2] };
-    const rs = t.match(/(?:Rescheduled:|Scheduled for) \w+, (\w{3}) (\d{1,2}) at (\d{1,2}):(\d{2}) ([AP]M)/);
+    const rs = t.match(/(?:Rescheduled:|Scheduled for)\s+\w+, (\w{3}) (\d{1,2}) at (\d{1,2}):(\d{2}) ([AP]M)/);
     if (rs) state.scheduledFor = fromRescheduled(rs, r.ts);
     if (/Call completed/i.test(t)) state.completed = true;
   }
