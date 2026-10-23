@@ -18,7 +18,10 @@ function messageText(m) {
     if (Array.isArray(node)) { node.forEach((n) => collect(n, out)); return out; }
     if (typeof node.text === 'string') out.push(node.text);
     if (node.type === 'link' && node.url) out.push(node.url);
-    for (const key of ['text', 'elements', 'fields', 'blocks']) if (typeof node[key] === 'object') collect(node[key], out);
+    // Latenode posts use collapsible "container" blocks with a title, subtitle and child_blocks.
+    for (const key of ['title', 'subtitle', 'text', 'elements', 'fields', 'blocks', 'child_blocks', 'accessory']) {
+      if (typeof node[key] === 'object') collect(node[key], out);
+    }
     return out;
   };
   const attachments = (m.attachments || []).flatMap((a) => [

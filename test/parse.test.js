@@ -106,3 +106,16 @@ test('reads job text from blocks when the message text is only a fallback', () =
   assert.match(text, /^132174$/m);
   assert.equal(messageText({ text: FAIRGROVE, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: FAIRGROVE } }] }), FAIRGROVE);
 });
+
+test('reads text inside Latenode container blocks', () => {
+  const { messageText } = require('../src/parse');
+  const text = messageText({
+    text: '',
+    blocks: [{ type: 'container', title: { type: 'plain_text', text: '132181' }, child_blocks: [
+      { type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text: '132181\n261000-1\nFairgrove Property Management' }] }] },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: 'Rec0CBADHFW3V' }] },
+    ] }],
+  });
+  assert.match(text, /^132181$/m);
+  assert.match(text, /Fairgrove/);
+});

@@ -2,20 +2,26 @@
 const LIST_ID = process.env.CALLS_LIST_ID || 'F0C39RE7HDK';
 const OFFICE_USER = process.env.OFFICE_USER_ID || 'U0876C3TEGL'; // default assignee before a tech is picked
 
+// Each column has a key and a separate column id; the Call Route scenario writes by column id.
 const COL = {
-  name: 'name',
-  assignee: 'todo_assignee',
-  description: 'Col0C4DQV3BUK',
-  assigned: 'Col0C4EUSL2BF',
-  completed: 'Col0C5ECQNS56', // the job's own Completed checkbox, not the to-do one
-  assignedMessage: 'Col0C56LDTN9Z',
-  workDone: 'Col0C5S35HL0J',
+  name: ['name', 'Col00'],
+  assignee: ['todo_assignee', 'Col01'],
+  description: ['Col0C4DQV3BUK'],
+  assigned: ['Col0C4EUSL2BF', 'Col0C5ECNLSBS'],
+  completed: ['Col0C5ECQNS56', 'Col0C4PMWD5T6'], // the job's own Completed checkbox, not the to-do one
+  assignedMessage: ['Col0C56LDTN9Z', 'Col0C5CNVAHH8'],
+  workDone: ['Col0C5S35HL0J'],
 };
 
-// Slack list fields arrive as { key | column_id, value, text, checkbox, user, ... } depending on type.
+// Slack list fields arrive as { key, column_id, value, text, checkbox, user, ... } depending on type.
 function fieldMap(item) {
+  const byId = {};
+  for (const f of item.fields || []) {
+    if (f.key) byId[f.key] = f;
+    if (f.column_id) byId[f.column_id] = f;
+  }
   const out = {};
-  for (const f of item.fields || []) out[f.key || f.column_id] = f;
+  for (const [name, ids] of Object.entries(COL)) out[name] = ids.map((id) => byId[id]).find(Boolean);
   return out;
 }
 
@@ -48,17 +54,17 @@ function messageLink(f) {
 
 function parseListItem(item) {
   const f = fieldMap(item);
-  const jobNumber = textOf(f[COL.name]).trim().match(/^\d{5,7}$/)?.[0];
+  const jobNumber = textOf(f.name).trim().match(/^\d{5,7}$/)?.[0];
   if (!jobNumber) return null;
-  const assignee = userOf(f[COL.assignee]);
+  const assignee = userOf(f.assignee);
   return {
     jobNumber,
     recordId: item.id,
-    assigneeId: checked(f[COL.assigned]) && assignee !== OFFICE_USER ? assignee : null,
-    completed: checked(f[COL.completed]),
-    description: textOf(f[COL.description]),
-    assignedMessageUrl: messageLink(f[COL.assignedMessage]),
-    workDone: textOf(f[COL.workDone]) || null,
+    assigneeId: checked(f.assigned) && assignee !== OFFICE_USER ? assignee : null,
+    completed: checked(f.completed),
+    description: textOf(f.description),
+    assignedMessageUrl: messageLink(f.assignedMessage),
+    workDone: textOf(f.workDone) || null,
   };
 }
 
