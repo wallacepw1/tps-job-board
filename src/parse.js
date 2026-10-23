@@ -100,7 +100,7 @@ function parseIntake(rawText) {
 }
 
 function parseReplies(replies) {
-  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false };
+  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, canceled: false };
   for (const r of replies) {
     const t = r.text || '';
     const a = t.match(/Call assigned to ([\w .'-]+?) on (\S+)/);
@@ -113,6 +113,7 @@ function parseReplies(replies) {
     const rs = t.match(/(?:Rescheduled:|Scheduled for)\s+\w+, (\w{3}) (\d{1,2}) at (\d{1,2}):(\d{2}) ([AP]M)/);
     if (rs) state.scheduledFor = fromRescheduled(rs, r.ts);
     if (/Call completed/i.test(t)) state.completed = true;
+    if (/Call (?:was )?cancell?ed/i.test(t)) state.canceled = true;
   }
   return state;
 }

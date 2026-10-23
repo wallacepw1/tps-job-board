@@ -103,7 +103,8 @@ class JobStore {
       job.workDone = row.workDone;
     }
 
-    this.jobs = [...byNumber.values()].map(finalize).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
+    // A canceled call drops off the board everywhere; its note stays in #incoming-calls.
+    this.jobs = [...byNumber.values()].filter((j) => !j.canceled).map(finalize).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
     this.updatedAt = new Date();
     this.stats = {
       updatedAt: this.updatedAt,

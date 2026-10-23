@@ -136,3 +136,8 @@ test('reads schedule dates stored as Slack date tokens or rich-text dates', () =
   ] }] }] });
   assert.deepEqual(parseReplies([{ text: rich }]).scheduledFor, { date: '2026-10-23', time: '09:00' });
 });
+
+test('marks a call canceled from its thread reply', () => {
+  assert.equal(parseReplies([{ text: 'Call was canceled by: future-calls' }]).canceled, true);
+  assert.equal(parseReplies([{ text: 'Call assigned to Eduardo on 2026-10-22T17:49:56Z' }]).canceled, false);
+});
