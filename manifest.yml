@@ -1,4 +1,4 @@
-# Paste into api.slack.com/apps -> Create New App -> From a manifest. Replace YOUR-APP-URL.
+# Paste into api.slack.com/apps -> Create New App -> From a manifest. If Render gives the service a different URL, update the three URLs below.
 display_information:
   name: TPS Job Board
   description: See every TPS job, who's on it, and when, from anywhere in Slack.
@@ -17,7 +17,7 @@ features:
       description: Show today's jobs
   slash_commands:
     - command: /jobs
-      url: https://YOUR-APP-URL/slack/events
+      url: https://tps-job-board.onrender.com/slack/events
       description: Open the job board, or look up one job
       usage_hint: "[job # | tech name]"
 oauth_config:
@@ -29,11 +29,11 @@ oauth_config:
       - chat:write
 settings:
   event_subscriptions:
-    request_url: https://YOUR-APP-URL/slack/events
+    request_url: https://tps-job-board.onrender.com/slack/events
     bot_events:
       - app_home_opened
   interactivity:
     is_enabled: true
-    request_url: https://YOUR-APP-URL/slack/events
+    request_url: https://tps-job-board.onrender.com/slack/events
   org_deploy_enabled: false
   socket_mode_enabled: false

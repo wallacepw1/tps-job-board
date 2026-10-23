@@ -26,7 +26,7 @@ The app only reads. It never posts in channels or edits the calendar. Data refre
 1. **Calendar link.** Google Calendar → Settings → *TPS Jobs* → Integrate calendar → copy **Secret address in iCal format**.
 2. **Slack app.** api.slack.com/apps → Create New App → From a manifest → TPS workspace → paste `manifest.yml`. Install it, then copy the **Bot User OAuth Token** (`xoxb-…`) and, under Basic Information, the **Signing Secret**.
 3. **Render.** New → Blueprint → pick this repo. Fill in `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `CALENDAR_ICS_URL`.
-4. **Point Slack at Render.** In `manifest.yml` replace `YOUR-APP-URL` with the Render URL (e.g. `tps-job-board.onrender.com`), and update the app's manifest in Slack.
+4. **Check the URL.** The manifest assumes Render serves the app at `tps-job-board.onrender.com`. If Render picks a different URL, change the three URLs in the app's manifest in Slack to match.
 5. **Invite the bot** to #incoming-calls: `/invite @TPS Job Board`.
 
 ## Development
