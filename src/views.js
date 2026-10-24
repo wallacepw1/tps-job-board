@@ -9,6 +9,7 @@ const STATUS = {
 };
 
 const TABS = [
+  { id: 'mine', label: 'My jobs' },
   { id: 'today', label: 'Today' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'week', label: 'This week' },
@@ -55,7 +56,7 @@ function carriedOver(job, today) {
   return day < today && Date.now() - job.when < CARRY_DAYS * 864e5;
 }
 
-function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
+function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = new Date()) {
   const today = dayKey(now);
   const tomorrow = dayKey(new Date(now.getTime() + 864e5));
   const weekEnd = dayKey(new Date(now.getTime() + 7 * 864e5));
@@ -63,6 +64,8 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
   let list = jobs.filter((j) => {
     const day = j.when ? dayKey(j.when) : null;
     switch (tab) {
+      // The viewer's own jobs: everything still open, plus what they finished today.
+      case 'mine': return j.techId === user && (j.status !== 'done' || day === today);
       case 'today': return day === today;
       case 'tomorrow': return day === tomorrow;
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
@@ -71,6 +74,12 @@ function filterJobs(jobs, { tab = 'today', tech = 'all' }, now = new Date()) {
       default: return true;
     }
   });
+  if (tab === 'mine') {
+    // Open work first (booked times in order, then the rest oldest first), today's finished jobs last.
+    const rank = (j) => (j.status === 'done' ? 2 : j.timed ? 0 : 1);
+    list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
+    return list;
+  }
   if (tech === 'unassigned') list = list.filter((j) => !j.tech);
   else if (tech !== 'all') list = list.filter((j) => j.tech === tech);
   if (tab === 'today') {
@@ -101,6 +110,10 @@ function jobBlocks(job) {
     job.filesUrl && button('Files', job.filesUrl, `files_${job.jobNumber}`),
     mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
     job.calendarLink && button('Calendar', job.calendarLink, `cal_${job.jobNumber}`),
+    // Posts photos and notes into the call's thread in the tech's channel.
+    job.assignedMessageUrl && job.status !== 'done' && {
+      type: 'button', text: { type: 'plain_text', text: '📸 Add photos/notes' }, action_id: `addnote_${job.jobNumber}`, value: job.jobNumber,
+    },
   ].filter(Boolean);
 
   const meta = [
@@ -166,7 +179,8 @@ function boardBlocks(store, filters) {
   ];
 
   if (!jobs.length) {
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '_No jobs here._' } });
+    const empty = filters.tab === 'mine' ? '_No jobs assigned to you right now._' : '_No jobs here._';
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: empty } });
   }
   const today = dayKey(new Date());
   let lastGroup = null;
@@ -186,6 +200,39 @@ function boardBlocks(store, filters) {
     : 'never';
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Updated ${updated} · from the TPS Jobs calendar and #incoming-calls · \`/jobs 132174\` to look up a job` }] });
   return blocks;
+}
+
+// Pop-up for a tech to send photos and notes to the call's thread in their channel.
+function noteModal(job) {
+  return {
+    type: 'modal',
+    callback_id: 'job_note',
+    private_metadata: JSON.stringify({ jobNumber: job.jobNumber, url: job.assignedMessageUrl }),
+    title: { type: 'plain_text', text: `Job ${job.jobNumber}` },
+    submit: { type: 'plain_text', text: 'Send' },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: [`*${job.jobNumber}*${job.client ? ` · ${job.client}` : ''}`, job.location ? `📍 ${job.location}` : null].filter(Boolean).join('\n') } },
+      {
+        type: 'input', block_id: 'photos', optional: true, label: { type: 'plain_text', text: 'Photos or videos' },
+        element: { type: 'file_input', action_id: 'files', max_files: 10, filetypes: ['jpg', 'jpeg', 'png', 'heic', 'gif', 'mp4', 'mov', 'pdf'] },
+      },
+      {
+        type: 'input', block_id: 'notes', optional: true, label: { type: 'plain_text', text: 'Notes' },
+        element: { type: 'plain_text_input', action_id: 'text', multiline: true, placeholder: { type: 'plain_text', text: 'What you found, what you did, parts used…' } },
+      },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: 'Goes into this call\'s thread in your channel.' }] },
+    ],
+  };
+}
+
+function messageModal(title, text) {
+  return {
+    type: 'modal',
+    title: { type: 'plain_text', text: title },
+    close: { type: 'plain_text', text: 'Close' },
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
+  };
 }
 
 function homeView(store, filters) {
@@ -212,4 +259,4 @@ function jobModal(job) {
   };
 }
 
-module.exports = { homeView, modalView, jobModal, filterJobs, jobBlocks, TABS };
+module.exports = { homeView, modalView, jobModal, noteModal, messageModal, filterJobs, jobBlocks, TABS };

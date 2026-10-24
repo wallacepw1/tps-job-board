@@ -1,7 +1,8 @@
-// TPS Job Board: Slack Home tab, /jobs command and shortcut, all read-only.
+// TPS Job Board: Slack Home tab, /jobs command and shortcut. The board is read-only; the one thing it
+// writes is a tech's photos and notes, into the call's thread in their channel.
 const { App, ExpressReceiver } = require('@slack/bolt');
 const { JobStore } = require('./jobs');
-const { homeView, modalView, jobModal, TABS } = require('./views');
+const { homeView, modalView, jobModal, noteModal, messageModal, TABS } = require('./views');
 
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
@@ -13,8 +14,9 @@ const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
 const store = new JobStore(app.client);
 const userFilters = new Map(); // userId -> { tab, tech }
 
+// Techs open on their own jobs; everyone else on Today.
 function filtersFor(user) {
-  return userFilters.get(user) || { tab: 'today', tech: 'all' };
+  return userFilters.get(user) || { tab: store.isTech(user) ? 'mine' : 'today', tech: 'all', user };
 }
 
 let refreshing = null;
@@ -69,6 +71,59 @@ app.action('refresh', async ({ ack, body, client }) => {
   await rerender(body, client);
 });
 
+app.action(/^addnote_/, async ({ ack, body, action, client }) => {
+  await ack();
+  const job = store.find(action.value);
+  const view = job?.assignedMessageUrl
+    ? noteModal(job)
+    : messageModal('Add photos/notes', `Job ${action.value} isn't assigned to a tech channel yet, so there's no thread to send to.`);
+  if (body.view?.type === 'modal') await client.views.push({ trigger_id: body.trigger_id, view });
+  else await client.views.open({ trigger_id: body.trigger_id, view });
+});
+
+app.view('job_note', async ({ ack, body, view, client }) => {
+  const { jobNumber, url } = JSON.parse(view.private_metadata);
+  const files = view.state.values.photos?.files?.files || [];
+  const notes = (view.state.values.notes?.text?.value || '').trim();
+  if (!files.length && !notes) {
+    await ack({ response_action: 'errors', errors: { notes: 'Add a photo or a note first.' } });
+    return;
+  }
+  await ack({ response_action: 'update', view: messageModal(`Job ${jobNumber}`, '⏳ Sending to the call thread…') });
+  let result;
+  try {
+    await postToThread(client, { url, user: body.user.id, notes, files });
+    result = `✅ Sent to job ${jobNumber}'s thread in your channel.`;
+  } catch (e) {
+    console.error('could not post photos/notes', jobNumber, e.data?.error || e.message);
+    result = `⚠️ Couldn't send that to job ${jobNumber} (${e.data?.error || e.message}). Please post it in the call thread yourself and tell Paul.`;
+  }
+  await client.views.update({ view_id: body.view.id, view: messageModal(`Job ${jobNumber}`, result) }).catch(() => {});
+});
+
+// "https://x.slack.com/archives/C0C1M4CRKSB/p1792691395739399" -> { channel, ts }
+function parseMessageUrl(url) {
+  const m = (url || '').match(/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/);
+  if (!m) throw new Error('no tech-channel link for this call');
+  return { channel: m[1], ts: `${m[2]}.${m[3]}` };
+}
+
+async function postToThread(client, { url, user, notes, files }) {
+  const { channel, ts } = parseMessageUrl(url);
+  await client.conversations.join({ channel }).catch(() => {}); // already a member, or a private channel it was invited to
+  if (notes) await client.chat.postMessage({ channel, thread_ts: ts, text: `📝 Notes from <@${user}>:\n${notes}` });
+  if (!files.length) return;
+  // Files picked in the pop-up belong to the tech; copy them into the thread.
+  const uploads = [];
+  for (const f of files) {
+    const { file } = await client.files.info({ file: f.id });
+    const res = await fetch(file.url_private_download || file.url_private, { headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` } });
+    if (!res.ok) throw new Error(`download failed (${res.status})`);
+    uploads.push({ file: Buffer.from(await res.arrayBuffer()), filename: file.name || `${f.id}.jpg` });
+  }
+  await client.filesUploadV2({ channel_id: channel, thread_ts: ts, initial_comment: `📸 Photos from <@${user}>`, file_uploads: uploads });
+}
+
 // Link buttons still send an action; acknowledge them so Slack shows no error.
 app.action(/^(thread|techmsg|future|files|map|cal)_/, async ({ ack }) => ack());
 
@@ -76,6 +131,12 @@ app.command('/jobs', async ({ ack, command, client }) => {
   await ack();
   const arg = command.text.trim();
   if (!store.updatedAt) await refresh();
+  if (/^(me|mine|my)$/i.test(arg)) {
+    const filters = { ...filtersFor(command.user_id), tab: 'mine', user: command.user_id };
+    userFilters.set(command.user_id, filters);
+    await client.views.open({ trigger_id: command.trigger_id, view: modalView(store, filters) });
+    return;
+  }
   if (/^\d{5,7}$/.test(arg)) {
     const job = store.find(arg);
     if (job) {
