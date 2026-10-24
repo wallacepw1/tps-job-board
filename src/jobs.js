@@ -97,7 +97,10 @@ class JobStore {
     for (const [num, row] of calls) {
       const job = byNumber.get(num);
       if (!job) continue; // only jobs that are on the calendar or in #incoming-calls
-      if (row.assigneeId) job.tech = await this.userName(row.assigneeId);
+      if (row.assigneeId) {
+        job.techId = row.assigneeId;
+        job.tech = await this.userName(row.assigneeId);
+      }
       if (row.completed) job.completed = true;
       job.assignedMessageUrl = row.assignedMessageUrl;
       job.workDone = row.workDone;
@@ -198,6 +201,11 @@ class JobStore {
 
   find(number) {
     return this.jobs.find((j) => j.jobNumber === String(number));
+  }
+
+  // True when this Slack user is the assigned tech on any job, so their board opens on My jobs.
+  isTech(userId) {
+    return this.jobs.some((j) => j.techId === userId);
   }
 
   techs() {

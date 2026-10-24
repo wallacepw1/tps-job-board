@@ -57,3 +57,23 @@ test('shows Future calls until a tech is assigned, then Tech chat', () => {
   assert.ok(buttons(assigned).includes('Tech chat'));
   assert.ok(!buttons(assigned).includes('Future calls'));
 });
+
+test('My jobs shows only the viewer\'s open jobs plus what they finished today', () => {
+  const mine = [
+    { jobNumber: '1', techId: 'U1', status: 'assigned', when: new Date(now - 2 * 864e5), timed: false },
+    { jobNumber: '2', techId: 'U1', status: 'scheduled', when: zonedDate(today, '10:00'), timed: true },
+    { jobNumber: '3', techId: 'U1', status: 'done', when: now, timed: false },
+    { jobNumber: '4', techId: 'U1', status: 'done', when: new Date(now - 2 * 864e5), timed: false },
+    { jobNumber: '5', techId: 'U2', status: 'assigned', when: now, timed: false },
+  ];
+  assert.deepEqual(filterJobs(mine, { tab: 'mine', tech: 'all', user: 'U1' }).map((j) => j.jobNumber), ['2', '1', '3']);
+});
+
+test('assigned open jobs get an Add photos/notes button', () => {
+  const { jobBlocks, noteModal } = require('../src/views');
+  const job = { jobNumber: '132180', status: 'assigned', assignedMessageUrl: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1792691395739399' };
+  const add = jobBlocks(job)[2].elements.find((e) => e.action_id === 'addnote_132180');
+  assert.equal(add.value, '132180');
+  assert.ok(!jobBlocks({ ...job, status: 'done' })[2].elements.some((e) => e.action_id?.startsWith('addnote_')));
+  assert.deepEqual(JSON.parse(noteModal(job).private_metadata), { jobNumber: '132180', url: job.assignedMessageUrl });
+});
