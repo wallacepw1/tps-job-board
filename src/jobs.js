@@ -235,7 +235,9 @@ function addFuture(found, msg) {
   const intake = parseIntake(msg.text);
   // Future-calls posts can lead with the client name instead of the job number.
   if (!intake.jobNumber) intake.client = msg.text.trim().split('\n')[0].trim();
-  const threadTs = msg.text.match(/^\s*(\d{10}\.\d{6})\s*$/m)?.[1] || null;
+  // Older posts show the #incoming-calls ts on its own line; newer ones hide it and link the original call instead.
+  const link = msg.text.match(/archives\/C0C19TG3KJ6\/p(\d{10})(\d{6})/);
+  const threadTs = msg.text.match(/^\s*(\d{10}\.\d{6})\s*$/m)?.[1] || (link ? `${link[1]}.${link[2]}` : null);
   found.set(num, { scheduledFor, intake, threadTs, futureTs: msg.ts });
 }
 
