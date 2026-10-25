@@ -97,6 +97,16 @@ test('reads a #future-calls post as the schedule for that job', () => {
   assert.equal(f.intake.client, 'TORREY PINES PROPERTY MGMT, INC.');
 });
 
+test('reads the hidden thread ts from the original-call link on a #future-calls post', () => {
+  const { addFuture } = require('../src/jobs');
+  const found = new Map();
+  addFuture(found, {
+    ts: '1792718000.000000',
+    text: '132118\n385138-1\n540 Naples Street\nChula Vista, CA 91911\n:link: <https://tpsplumbing.slack.com/archives/C0C19TG3KJ6/p1792178561478429|Original call in #incoming-calls>\n*The call is Scheduled for Monday, Oct 26 at 9:00 AM*',
+  });
+  assert.equal(found.get('132118').threadTs, '1792178561.478429');
+});
+
 test('reads job text from blocks when the message text is only a fallback', () => {
   const { messageText } = require('../src/parse');
   const text = messageText({
