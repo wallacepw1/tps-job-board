@@ -158,3 +158,23 @@ test('records when the call was completed', () => {
   assert.equal(st.completed, true);
   assert.equal(st.completedAt.toISOString(), new Date(1792450000000).toISOString());
 });
+
+test('a send-back or reassign after Call completed reopens the job (132099 return visit)', () => {
+  const done = { ts: '1792803861.150319', text: ':white_check_mark: *Call completed* in #eduardo-calls by <@U0876C3TEGL>' };
+  assert.equal(parseReplies([done]).completed, true);
+  for (const text of [
+    ':hourglass_flowing_sand: *Needs to be scheduled - no date yet*\nSent from #eduardo-calls by <@U0876C3TEGL> to <#C0C2XB4VD1N>',
+    ':calendar: *Rescheduled: 2026-10-28 at 09:00* Rescheduled from #eduardo-calls by <@U0876C3TEGL>',
+    ':arrows_counterclockwise: Sent to <#C0C2XUL7ZHN> for assignment by <@U0876C3TEGL>',
+    'Call assigned to Eduardo on Tue Oct 27, 2026 9:00 AM',
+    'Call reassigned from Esteban to Eduardo on Tue Oct 27, 2026 9:00 AM by <@U0876C3TEGL>'
+  ]) {
+    const s = parseReplies([done, { ts: '1793027216.986929', text }]);
+    assert.equal(s.completed, false, text);
+    assert.equal(s.completedAt, null, text);
+  }
+  const again = parseReplies([done, { text: 'Call assigned to Eduardo on Tue Oct 27, 2026 9:00 AM' }, { ts: '1793130000.000000', text: ':white_check_mark: *Call completed* in #eduardo-calls by <@U0C1M4CRKSB>' }]);
+  assert.equal(again.completed, true);
+  assert.equal(again.completedAt.getTime(), 1793130000000);
+  assert.equal(parseReplies([{ text: 'Call reassigned from Esteban to Eduardo on Tue Oct 27, 2026 9:00 AM' }]).tech, 'Eduardo');
+});

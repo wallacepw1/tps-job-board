@@ -99,11 +99,20 @@ function parseIntake(rawText) {
   return { jobNumber, workOrder, client, address, issue, filesUrl, emergency };
 }
 
+// Thread notes Call Route posts when a call is sent back or (re)assigned.
+const REOPEN = /^\s*(?:Call (?:re)?assigned |:arrows_counterclockwise: Sent to <#|:calendar: \*Rescheduled:|:hourglass_flowing_sand: \*Needs to be scheduled)/;
+
 function parseReplies(replies) {
   const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false };
   for (const r of replies) {
     const t = r.text || '';
-    const a = t.match(/Call assigned to ([\w .'-]+?) on (\S+)/);
+    // A send-back or (re)assign after a completion means the job was not really finished (Paul 2026-10-26,
+    // 132099 needs a return visit): it is open again until the next "Call completed".
+    if (state.completed && REOPEN.test(t)) {
+      state.completed = false;
+      state.completedAt = null;
+    }
+    const a = t.match(/Call (?:assigned|reassigned from [\w .'-]+?) to ([\w .'-]+?) on (\S+)/);
     if (a) {
       state.tech = a[1].trim();
       state.assignedAt = a[2];
