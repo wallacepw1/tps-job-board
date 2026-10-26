@@ -48,6 +48,12 @@ function fmtTime(job, now = new Date()) {
 
 const CARRY_DAYS = Number(process.env.CARRY_OVER_DAYS || 7);
 
+// A done job only belongs to the day it was finished (the "Call completed" reply's time). A job finished
+// early, or ticked Completed with no reply, drops off its booked day instead of showing as today's work.
+function doneOn(job, day) {
+  return job.status === 'done' && Boolean(job.completedAt) && dayKey(job.completedAt) === day;
+}
+
 // A call from the last few days that was never completed shows under All open. Only calls with an
 // #incoming-calls thread qualify, since otherwise nothing could ever mark them done.
 function carriedOver(job, today) {
@@ -65,12 +71,13 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
     const day = j.when ? dayKey(j.when) : null;
     switch (tab) {
       // The viewer's own jobs: everything still open, plus what they finished today.
-      case 'mine': return j.techId === user && (j.status !== 'done' || day === today);
-      case 'today': return day === today;
-      case 'tomorrow': return day === tomorrow;
+      case 'mine': return j.techId === user && (j.status !== 'done' || doneOn(j, today));
+      // Today: open jobs for today, then the ones finished today (shown apart, under "Done today").
+      case 'today': return j.status === 'done' ? doneOn(j, today) : day === today;
+      case 'tomorrow': return day === tomorrow && j.status !== 'done';
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
-      case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today));
-      case 'recent': return j.status === 'done' && (j.when || j.postedAt || 0) >= weekAgo;
+      case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today) || Boolean(j.needsDate));
+      case 'recent': return j.status === 'done' && (j.completedAt || j.when || j.postedAt || 0) >= weekAgo;
       default: return true;
     }
   });
@@ -83,11 +90,11 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
   if (tech === 'unassigned') list = list.filter((j) => !j.tech);
   else if (tech !== 'all') list = list.filter((j) => j.tech === tech);
   if (tab === 'today') {
-    // Booked times in time order, then today's new calls.
-    const rank = (j) => (j.timed ? 0 : 1);
+    // Booked times in time order, then today's new calls, then what was finished today.
+    const rank = (j) => (j.status === 'done' ? 2 : j.timed ? 0 : 1);
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
   }
-  if (tab === 'recent') list.sort((a, b) => (b.when || 0) - (a.when || 0));
+  if (tab === 'recent') list.sort((a, b) => (b.completedAt || b.when || 0) - (a.completedAt || a.when || 0));
   return list;
 }
 
@@ -186,7 +193,7 @@ function boardBlocks(store, filters) {
   let lastGroup = null;
   for (const job of jobs.slice(0, MAX_JOBS)) {
     if (filters.tab === 'today') {
-      const group = job.timed ? '📅 Booked times' : '🆕 Today\'s calls';
+      const group = job.status === 'done' ? '✅ Done today' : job.timed ? '📅 Booked times' : '🆕 Today\'s calls';
       if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
       lastGroup = group;
     }
