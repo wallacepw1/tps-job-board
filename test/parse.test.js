@@ -175,6 +175,37 @@ test('a send-back or reassign after Call completed reopens the job (132099 retur
   }
   const again = parseReplies([done, { text: 'Call assigned to Eduardo on Tue Oct 27, 2026 9:00 AM' }, { ts: '1793130000.000000', text: ':white_check_mark: *Call completed* in #eduardo-calls by <@U0C1M4CRKSB>' }]);
   assert.equal(again.completed, true);
+  assert.equal(again.reopened, false);
   assert.equal(again.completedAt.getTime(), 1793130000000);
   assert.equal(parseReplies([{ text: 'Call reassigned from Esteban to Eduardo on Tue Oct 27, 2026 9:00 AM' }]).tech, 'Eduardo');
+});
+
+test('a return visit takes the new date or drops the old one, and a checked Calls list does not close it again', () => {
+  const { applyListCompleted, finalize } = require('../src/jobs');
+  const { filterJobs } = require('../src/views');
+  const scheduled = { text: '*The call is Scheduled for 2026-10-26 at 09:00*' };
+  const done = { ts: '1792803861.150319', text: ':white_check_mark: *Call completed* in #eduardo-calls by <@U0876C3TEGL>' };
+  const needs = { text: ':hourglass_flowing_sand: *Needs to be scheduled - no date yet*\nSent from #eduardo-calls by <@U0876C3TEGL> to <#C0C2XB4VD1N>' };
+  const moved = { text: ':calendar: *Rescheduled: 2026-10-28 at 09:00* Rescheduled from #eduardo-calls by <@U0876C3TEGL>' };
+
+  const cleared = parseReplies([scheduled, done, needs]);
+  assert.equal(cleared.scheduledFor, null);
+  assert.equal(cleared.needsDate, true);
+  assert.equal(cleared.reopened, true);
+  const openJob = finalize({
+    ...applyListCompleted({ ...cleared, tech: 'Eduardo', threadTs: '1.000000' }, true),
+    jobNumber: '132099',
+    postedAt: new Date('2020-01-01T20:00:00Z'),
+  });
+  assert.notEqual(openJob.status, 'done');
+  assert.equal(filterJobs([openJob], { tab: 'today', tech: 'all' }).length, 0);
+  assert.equal(filterJobs([openJob], { tab: 'open', tech: 'all' }).length, 1);
+
+  const rescheduled = parseReplies([scheduled, done, moved]);
+  assert.deepEqual(rescheduled.scheduledFor, { date: '2026-10-28', time: '09:00' });
+  assert.equal(applyListCompleted({ ...rescheduled }, true).completed, false);
+
+  const finished = applyListCompleted({ ...parseReplies([done]) }, true);
+  assert.equal(finished.completed, true);
+  assert.equal(applyListCompleted({ completed: false }, true).completed, true);
 });

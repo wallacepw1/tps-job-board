@@ -109,7 +109,9 @@ class JobStore {
         job.techId = row.assigneeId;
         job.tech = await this.userName(row.assigneeId);
       }
-      if (row.completed) job.completed = true;
+      // A still-checked Completed box must not undo a thread send-back. That job stays open until
+      // the next "Call completed"; otherwise it would vanish (done, but with no completion time).
+      applyListCompleted(job, row.completed);
       job.assignedMessageUrl = row.assignedMessageUrl;
       job.workDone = row.workDone;
     }
@@ -287,11 +289,27 @@ function dayKey(d) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 
-// "2026-10-23", "09:00" in TZ -> Date
+// "2026-10-23", "09:00" in TZ -> Date. The offset comes from TZ, not the host zone.
 function zonedDate(date, time) {
   const guess = new Date(`${date}T${time.padStart(5, '0')}:00Z`);
-  const local = new Date(guess.toLocaleString('en-US', { timeZone: TZ }));
-  return new Date(guess.getTime() + (guess - local));
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(guess).map((p) => [p.type, p.value]));
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
+  return new Date(guess.getTime() + (guess.getTime() - asUtc));
 }
 
-module.exports = { JobStore, addFuture, preferEvent, jobNumberIn, dayKey, isIntakePlaceholder, isToSchedule, finalize, zonedDate, TZ };
+// The Calls list Completed box marks a job done, unless the thread was sent back after that completion.
+function applyListCompleted(job, listCompleted) {
+  if (listCompleted && !job.reopened) job.completed = true;
+  return job;
+}
+
+module.exports = { JobStore, addFuture, preferEvent, jobNumberIn, dayKey, isIntakePlaceholder, isToSchedule, finalize, applyListCompleted, zonedDate, TZ };

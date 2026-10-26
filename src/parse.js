@@ -103,7 +103,7 @@ function parseIntake(rawText) {
 const REOPEN = /^\s*(?:Call (?:re)?assigned |:arrows_counterclockwise: Sent to <#|:calendar: \*Rescheduled:|:hourglass_flowing_sand: \*Needs to be scheduled)/;
 
 function parseReplies(replies) {
-  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false };
+  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false, reopened: false };
   for (const r of replies) {
     const t = r.text || '';
     // A send-back or (re)assign after a completion means the job was not really finished (Paul 2026-10-26,
@@ -111,18 +111,31 @@ function parseReplies(replies) {
     if (state.completed && REOPEN.test(t)) {
       state.completed = false;
       state.completedAt = null;
+      state.reopened = true;
+      // "No date yet" drops the old appointment so it does not stay on that day. A later schedule replaces this.
+      if (/needs to be scheduled/i.test(t)) {
+        state.scheduledFor = null;
+        state.needsDate = true;
+      }
     }
     const a = t.match(/Call (?:assigned|reassigned from [\w .'-]+?) to ([\w .'-]+?) on (\S+)/);
     if (a) {
       state.tech = a[1].trim();
       state.assignedAt = a[2];
     }
-    const s = t.match(/Scheduled for\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})/);
-    if (s) state.scheduledFor = { date: s[1], time: s[2] };
+    const s = t.match(/(?:Scheduled for|Rescheduled:)\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})/);
+    if (s) {
+      state.scheduledFor = { date: s[1], time: s[2] };
+      state.needsDate = false;
+    }
     const rs = t.match(/(?:Rescheduled:|Scheduled for)\s+\w+, (\w{3}) (\d{1,2}) at (\d{1,2}):(\d{2}) ([AP]M)/);
-    if (rs) state.scheduledFor = fromRescheduled(rs, r.ts);
+    if (rs) {
+      state.scheduledFor = fromRescheduled(rs, r.ts);
+      state.needsDate = false;
+    }
     if (/Call completed/i.test(t)) {
       state.completed = true;
+      state.reopened = false;
       // When the Complete button was pressed (the reply's own time), so a job finished early drops off its booked day.
       if (r.ts) state.completedAt = new Date(Number(r.ts) * 1000);
     }
