@@ -151,3 +151,10 @@ test('marks a call canceled from its thread reply', () => {
   assert.equal(parseReplies([{ text: 'Call was canceled by: future-calls' }]).canceled, true);
   assert.equal(parseReplies([{ text: 'Call assigned to Eduardo on 2026-10-22T17:49:56Z' }]).canceled, false);
 });
+
+test('records when the call was completed', () => {
+  const { parseReplies } = require('../src/parse');
+  const st = parseReplies([{ ts: '1792450000.000100', text: ':white_check_mark: *Call completed* in #eduardo-calls by Eduardo' }]);
+  assert.equal(st.completed, true);
+  assert.equal(st.completedAt.toISOString(), new Date(1792450000000).toISOString());
+});

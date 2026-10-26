@@ -100,7 +100,7 @@ function parseIntake(rawText) {
 }
 
 function parseReplies(replies) {
-  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, canceled: false };
+  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false };
   for (const r of replies) {
     const t = r.text || '';
     const a = t.match(/Call assigned to ([\w .'-]+?) on (\S+)/);
@@ -112,7 +112,11 @@ function parseReplies(replies) {
     if (s) state.scheduledFor = { date: s[1], time: s[2] };
     const rs = t.match(/(?:Rescheduled:|Scheduled for)\s+\w+, (\w{3}) (\d{1,2}) at (\d{1,2}):(\d{2}) ([AP]M)/);
     if (rs) state.scheduledFor = fromRescheduled(rs, r.ts);
-    if (/Call completed/i.test(t)) state.completed = true;
+    if (/Call completed/i.test(t)) {
+      state.completed = true;
+      // When the Complete button was pressed (the reply's own time), so a job finished early drops off its booked day.
+      if (r.ts) state.completedAt = new Date(Number(r.ts) * 1000);
+    }
     if (/Call (?:was )?cancell?ed/i.test(t)) state.canceled = true;
   }
   return state;

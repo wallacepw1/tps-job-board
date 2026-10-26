@@ -42,8 +42,14 @@ function textOf(v) {
 
 // An event the intake automation dropped at the moment the call came in, rather than a real appointment.
 function isIntakePlaceholder(ev) {
+  if (isToSchedule(ev)) return true;
   if (!ev.start?.dateTime || !ev.created) return false;
   return Math.abs(new Date(ev.start.dateTime) - new Date(ev.created)) < 5 * 60e3;
+}
+
+// Call Route's "No date yet" keeps the event but renames it "TO SCHEDULE - <job #>": its old time is not a booking.
+function isToSchedule(ev) {
+  return /^\s*TO SCHEDULE\b/i.test(ev?.summary || '');
 }
 
 class JobStore {
@@ -88,7 +94,9 @@ class JobStore {
     // #future-calls is the source of truth for a rescheduled job's day and time.
     for (const [num, f] of future) {
       const job = byNumber.get(num) || { ...f.intake, jobNumber: num, threadTs: f.threadTs };
-      job.scheduledFor = f.scheduledFor;
+      // The newest post wins: a "NEEDS TO BE SCHEDULED - no date yet" post clears an older date.
+      job.scheduledFor = f.scheduledFor || null;
+      job.needsDate = Boolean(f.needsDate);
       job.futureTs = f.futureTs;
       byNumber.set(num, job);
     }
@@ -225,27 +233,31 @@ function jobNumberIn(text) {
   return (text || '').match(/^\s*(\d{5,7})\s*$/m)?.[1] || null;
 }
 
+const NEEDS_DATE = /NEEDS TO BE SCHEDULED/i;
+
 function addFuture(found, msg) {
   const num = jobNumberIn(msg.text);
   const { scheduledFor } = parseReplies([{ text: msg.text, ts: msg.ts }]);
-  if (num && !scheduledFor) {
+  const needsDate = !scheduledFor && NEEDS_DATE.test(msg.text || '');
+  if (num && !scheduledFor && !needsDate) {
     console.warn(`future-calls post for ${num} has no schedule I can read:`, JSON.stringify({ text: msg.text?.slice(-300) }));
   }
-  if (!num || !scheduledFor) return;
+  if (!num || (!scheduledFor && !needsDate)) return;
   const intake = parseIntake(msg.text);
   // Future-calls posts can lead with the client name instead of the job number.
   if (!intake.jobNumber) intake.client = msg.text.trim().split('\n')[0].trim();
   // Older posts show the #incoming-calls ts on its own line; newer ones hide it and link the original call instead.
   const link = msg.text.match(/archives\/C0C19TG3KJ6\/p(\d{10})(\d{6})/);
   const threadTs = msg.text.match(/^\s*(\d{10}\.\d{6})\s*$/m)?.[1] || (link ? `${link[1]}.${link[2]}` : null);
-  found.set(num, { scheduledFor, intake, threadTs, futureTs: msg.ts });
+  found.set(num, { scheduledFor: scheduledFor || null, needsDate, intake, threadTs, futureTs: msg.ts });
 }
 
 // New calls are treated as work for the day they came in, and their clock time is not meaningful.
 // Only a reschedule (or a calendar event someone moved) gives a time worth showing.
 function finalize(job) {
   const ev = job.event;
-  const realAppointment = ev && !isIntakePlaceholder(ev);
+  // Waiting in #future-calls for a date: the calendar's old time is not a booking.
+  const realAppointment = ev && !job.needsDate && !isIntakePlaceholder(ev);
   let when = null;
   let timed = false;
   if (job.scheduledFor) {
@@ -255,7 +267,7 @@ function finalize(job) {
     timed = Boolean(ev.start.dateTime);
     when = new Date(ev.start.dateTime || `${ev.start.date}T08:00:00`);
   } else {
-    when = job.postedAt || (ev && new Date(ev.start.dateTime || ev.start.date)) || null;
+    when = job.postedAt || (ev && !job.needsDate && new Date(ev.start.dateTime || ev.start.date)) || null;
   }
   const calendarDay = realAppointment ? dayKey(new Date(ev.start.dateTime || ev.start.date)) : null;
   const mismatch = job.scheduledFor && calendarDay && calendarDay !== job.scheduledFor.date;
@@ -282,4 +294,4 @@ function zonedDate(date, time) {
   return new Date(guess.getTime() + (guess - local));
 }
 
-module.exports = { JobStore, addFuture, preferEvent, jobNumberIn, dayKey, isIntakePlaceholder, zonedDate, TZ };
+module.exports = { JobStore, addFuture, preferEvent, jobNumberIn, dayKey, isIntakePlaceholder, isToSchedule, finalize, zonedDate, TZ };
