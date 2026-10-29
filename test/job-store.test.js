@@ -28,3 +28,11 @@ test('a cancellation in the canonical Incoming removes a stale duplicate intake 
  s.fetchPosts=async()=>[{...parent,ts:'1780000000.000001',text:'132999\nOld duplicate intake',reply_count:0}];
  await s.refresh();assert.equal(s.find('132999'),undefined);assert.equal(s.jobs.length,0);
 });
+test('a file-only Incoming is verified against its matching work order and Calls record',async()=>{
+ const card={...source(),role:'completed',recordId:'RecTEST123'};card.message.text='132999\n250089-2\nTest customer';
+ const s=store(card);s.fetchCalls=async()=>new Map([['132999',{recordId:'RecTEST123',description:card.message.text}]]);
+ s.slack.conversations.replies=async()=>({messages:[{ts:parent.ts,text:'',files:[{name:'250089-2.pdf'}]}]});
+ await s.refresh();assert.equal(s.find('132999').status,'done');assert.equal(s.find('132999').workOrder,'250089-2');
+ s.slack.conversations.replies=async()=>({messages:[{ts:parent.ts,text:'',files:[{name:'unrelated.pdf'}]}]});
+ await assert.rejects(s.refresh(),/Incoming identity/);
+});
