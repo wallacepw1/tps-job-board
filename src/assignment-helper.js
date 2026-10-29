@@ -1,7 +1,7 @@
 'use strict';
 const INCOMING='C0C19TG3KJ6';
 const url=(channel,ts)=>'https://tpsplumbing.slack.com/archives/'+channel+'/p'+ts.replace('.','');
-function revision(m){return JSON.stringify([m.ts,m.user||'',m.text||'',m.blocks||[],(m.files||[]).map(f=>f.id).sort()]);}
+function revision(m){return JSON.stringify([m.ts,m.user||'',m.text||'',m.blocks||[],(m.files||[]).map(f=>f.id).sort()],(key,value)=>key==='block_id'?undefined:value);}
 function helperBlocks(c,h){return[
  {type:'section',block_id:'tps_helper:'+c.recordId+':'+h.requestId,text:{type:'mrkdwn',text:'*Helper — call '+c.jobNumber+'*\nHelper: <@'+h.user+'> · Lead: <@'+c.lead+'>\n'+(c.address||'')+'\nThis is the same call and invoice. Post photos and comments in this thread.'}},
  {type:'actions',elements:[...(h.ts?[{type:'button',action_id:'tps_helper_notes',text:{type:'plain_text',text:'Add photos/notes'},url:url(h.channel,h.ts)+'?thread_ts='+h.ts+'&cid='+h.channel}]:[]),{type:'button',action_id:'tps_helper_done',text:{type:'plain_text',text:'Helper work finished'},value:JSON.stringify({recordId:c.recordId,incomingTs:c.incomingTs})},{type:'button',action_id:'tps_helper_lead',text:{type:'plain_text',text:'Open lead call'},url:url(c.source.channel,c.source.ts)},{type:'button',action_id:'tps_helper_incoming',text:{type:'plain_text',text:'Incoming history'},url:url(INCOMING,c.incomingTs)}]}
@@ -42,7 +42,7 @@ function createHelperService(a){
     previous=snapshot;
    }
    return{verified:false,error:'Helper replies are still arriving. Wait a moment, then retry.'};
-  }catch{return{verified:false,error:'Helper records could not all be verified. Source messages were retained.'};}
+  }catch(e){return{verified:false,error:'Helper records could not all be verified. Source messages were retained.',detail:e.slackError||e.message||'Unknown archive error'};}
  }
  return{
   async ensure(c,h){const existing=await a.findCard(c,h);const card=existing||await a.postCard(c,h,helperBlocks(c,h));await a.updateCard({...h,...card},helperBlocks(c,{...h,...card}));return card;},
