@@ -1,6 +1,6 @@
 'use strict';
 const {validateAssignment}=require('./assignment-policy');
-const fingerprint=r=>JSON.stringify([r.actor,r.operation,r.recordId,r.incomingTs,r.expectedLead,r.expectedHelper,r.target]);
+const fingerprint=r=>JSON.stringify([r.actor,r.operation,r.recordId,r.incomingTs,r.expectedLead,r.expectedHelper,r.target,...(r.operation==='reschedule'?[r.schedule?.noDate===true?'none':[r.schedule?.date,r.schedule?.time]]:[])]);
 async function handleAssignment(r,ctx){
  const refused=error=>({requestId:r?.requestId,status:'refused',error});
  if(!ctx.authenticated||!ctx.serialized||ctx.actor!==r?.actor)return refused('The assignment request was not verified.');
@@ -20,17 +20,17 @@ async function handleAssignment(r,ctx){
  }
  // A dispatch may have succeeded before its response was lost. Never repeat it blindly.
  if(old&&['working','uncertain'].includes(old.status)){
-  if(['assign','reassign','lead_complete'].includes(r.operation)&&state.dispatchStarted===r.requestId){
+  if(['assign','reassign','reschedule','lead_complete'].includes(r.operation)&&state.dispatchStarted===r.requestId){
    let verified=false;try{verified=await ctx.verifyDispatch(r,c,state);}catch{}
    if(!verified)return save({...old,status:'uncertain',error:'The previous dispatch needs verification before it can be repeated.'});
    if(state.helper&&r.operation==='reassign')await ctx.helper.updateLead(c,{...state.helper},r.target);
-   if(state.helper&&r.operation==='lead_complete'){await ctx.helper.retire(c,state.helper);state.helper=null;}
-   state.effect={requestId:r.requestId,result:{status:'done',lead:r.operation==='lead_complete'?c.lead:r.target,helper:state.helper?.user||null}};await ctx.state.set(r.recordId,state);await ctx.audit(r,c,state);const result=state.effect.result;await release();return save(result);
+   if(state.helper&&['reschedule','lead_complete'].includes(r.operation)){await ctx.helper.retire(c,state.helper);state.helper=null;}
+   state.effect={requestId:r.requestId,result:{status:'done',lead:r.operation==='reschedule'?null:r.operation==='lead_complete'?c.lead:r.target,helper:state.helper?.user||null}};await ctx.state.set(r.recordId,state);await ctx.audit(r,c,state);const result=state.effect.result;await release();return save(result);
   }
   // Helper adapters resume by stored card/source IDs and verified archive receipts.
  }
  const ownPendingHelper=r.operation==='helper_add'&&old&&state.helper?.requestId===r.requestId;
- const ownRetirement=state.helperRetiredRequest===r.requestId&&r.operation==='lead_complete'&&old;
+ const ownRetirement=state.helperRetiredRequest===r.requestId&&['reschedule','lead_complete'].includes(r.operation)&&old;
  const validation=validateAssignment(r,ownPendingHelper||ownRetirement?{...c,helper:r.expectedHelper}:c);
  if(!validation.ok)return refused(validation.error);
  state.activeRequest=r.requestId;await ctx.state.set(r.recordId,state);
@@ -41,15 +41,16 @@ async function handleAssignment(r,ctx){
    await ctx.state.set(r.recordId,state);
    const card=await ctx.helper.ensure(c,state.helper);
    state.helper={...state.helper,...card,closing:false};await ctx.state.set(r.recordId,state);
-  }else if(['helper_remove','helper_done','lead_complete'].includes(r.operation)&&state.helper){
+  }else if(['helper_remove','helper_done','reschedule','lead_complete'].includes(r.operation)&&state.helper){
    state.helper.closing=true;await ctx.state.set(r.recordId,state);
    const copied=await ctx.helper.archive(c,state.helper);
    if(!copied?.verified){state.helper.closing=false;await release();return save({status:'failed',error:copied?.error||'Helper records are not yet verified. Nothing was deleted.'});}
    await ctx.helper.retire(c,state.helper);state.helper=null;
-   if(r.operation==='lead_complete')state.helperRetiredRequest=r.requestId;
+   if(['reschedule','lead_complete'].includes(r.operation))state.helperRetiredRequest=r.requestId;
    await ctx.state.set(r.recordId,state);
   }
-  if(['assign','reassign','lead_complete'].includes(r.operation)){
+  if(['assign','reassign','reschedule','lead_complete'].includes(r.operation)){
+   if(ctx.prepareDispatch)await ctx.prepareDispatch(r,c);
    state.dispatchStarted=r.requestId;await ctx.state.set(r.recordId,state);
    let dispatchError;
    try{await ctx.dispatch(r,c,state);}catch(e){dispatchError=e;}
@@ -58,9 +59,9 @@ async function handleAssignment(r,ctx){
    if(r.operation==='reassign'&&state.helper)await ctx.helper.updateLead(c,state.helper,r.target);
    if(r.operation==='lead_complete'&&state.helper){await ctx.helper.retire(c,state.helper);state.helper=null;}
   }
-  state.effect={requestId:r.requestId,result:{status:'done',lead:r.operation==='assign'||r.operation==='reassign'?r.target:c.lead,helper:state.helper?.user||null}};await ctx.state.set(r.recordId,state);
+  state.effect={requestId:r.requestId,result:{status:'done',lead:r.operation==='reschedule'?null:r.operation==='assign'||r.operation==='reassign'?r.target:c.lead,helper:state.helper?.user||null}};await ctx.state.set(r.recordId,state);
   await ctx.audit(r,c,state);
-  await release();return save({status:'done',lead:r.operation==='assign'||r.operation==='reassign'?r.target:c.lead,helper:state.helper?.user||null});
+  await release();return save({status:'done',lead:r.operation==='reschedule'?null:r.operation==='assign'||r.operation==='reassign'?r.target:c.lead,helper:state.helper?.user||null});
  }catch(e){
   // Keep the lock and receipts when a side effect could have occurred.
   return save({status:'uncertain',error:'This action needs verification before retrying. Its records were retained.'});

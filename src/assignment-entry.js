@@ -4,7 +4,7 @@ const {createRuntime}=require('./assignment-runtime');
 const {handleAssignment,fingerprint}=require('./assignment-worker');
 const {assignmentModal,decodeDraft}=require('./assignment');
 const {ADMINS,TECHS}=require('./assignment-policy');
-const {idsOf}=require('./assignment-route');
+const {idsOf,callFeedback}=require('./assignment-route');
 function validKey(a,b){return typeof a==='string'&&typeof b==='string'&&a.length>0&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));}
 const messageView=text=>({type:'modal',title:{type:'plain_text',text:'Assignment'},close:{type:'plain_text',text:'Close'},blocks:[{type:'section',text:{type:'mrkdwn',text:String(text).slice(0,2900)}}]});
 async function handleEnvelope(e,options){
@@ -71,10 +71,15 @@ async function handleEnvelope(e,options){
   const result=await handleAssignment(request,ctx);
   if(e.event?.view?.id)shell=e.event.view.id;
   if(shell)await options.slack('views.update',{view_id:shell,view:messageView(result.status==='done'?'✅ Saved. The call history has been updated.':result.error||'⏳ Still queued. Refresh the Job Board shortly.')});
-  if(result.status!=='done'&&e.event?.channel?.id&&actor)await options.slack('chat.postEphemeral',{channel:e.event.channel.id,user:actor,text:'⚠️ '+(result.error||'The action is not yet verified.')}).catch(()=>{});
+  if(result.status!=='done'){
+   let feedback=e.event;
+   if(request?.recordId){let saved=await options.store.getGlobalVariable('TPS_ASSIGN_FEEDBACK_'+request.recordId);try{saved=typeof saved==='string'?JSON.parse(saved):saved;}catch{saved=null;}if(saved)feedback={channel:{id:saved.channel},container:{message_ts:saved.ts},message:saved.message};}
+   if(feedback)await callFeedback(feedback,options,'⚠️ '+(result.error||'The action is not yet verified.')+' Check this call in the Job Board before retrying.').catch(()=>{});
+  }
   const {fingerprint:privateFingerprint,request:privateRequest,...out}=result;return out;
  }catch(err){
   if(shell)await options.slack('views.update',{view_id:shell,view:messageView(err.message)}).catch(()=>{});
+  else if(e.mode==='event_submit'&&ADMINS.includes(actor))await callFeedback(e.event,options,'⚠️ '+err.message+' Check the Job Board before retrying.').catch(()=>{});
   return{status:'refused',error:err.message};
  }
 }

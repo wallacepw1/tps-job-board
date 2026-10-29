@@ -6,7 +6,7 @@ const TECHS=[
  {id:'U0C2PMHJK0A',name:'Edgar',channel:'C0C2WV6EHR6'},
  {id:'U0C2JV565K7',name:'Cindy',channel:'C0C19G9GT34'}
 ];
-const OPERATIONS=['assign','reassign','helper_add','helper_remove','helper_done','lead_complete'];
+const OPERATIONS=['assign','reassign','reschedule','helper_add','helper_remove','helper_done','lead_complete'];
 function validateAssignment(r,c){
  const no=error=>({ok:false,error});
  if(!r||!c||!c.readVerified)return no('The current call could not be verified. Refresh and try again.');
@@ -20,6 +20,7 @@ function validateAssignment(r,c){
  if(!Object.hasOwn(r,'expectedLead')||r.expectedLead!==c.lead)return no('The lead plumber changed. Refresh before continuing.');
  if(!Object.hasOwn(r,'expectedHelper')||r.expectedHelper!==c.helper)return no('The helper changed. Refresh before continuing.');
  if(!['unassigned','plumber'].includes(c.stage))return no('This call is no longer awaiting assignment or in a plumber channel.');
+ if(r.operation==='reschedule'&&r.schedule?.noDate!==true){const s=r.schedule;if(!s||!/^\d{4}-\d{2}-\d{2}$/.test(s.date||'')||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.time||''))return no('Choose a valid date and Pacific time, or No date/time.');const d=new Date(s.date+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==s.date||s.date<c.today)return no('Choose today or a future date.');}
  if(['assign','reassign','helper_add'].includes(r.operation)){
   if(!TECHS.some(t=>t.id===r.target))return no('Choose a current TPS plumber.');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(c.today||''))return no('The current Pacific date is unavailable.');

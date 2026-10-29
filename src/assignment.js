@@ -1,10 +1,10 @@
 'use strict';
 const {createHmac,timingSafeEqual,randomUUID}=require('node:crypto');
 const {ADMINS,TECHS}=require('./assignment-policy');
-const LABELS={assign:'Assign',reassign:'Reassign',helper_add:'Assign helper',helper_remove:'Remove helper'};
+const LABELS={assign:'Assign',reassign:'Reassign',reschedule:'Reschedule',helper_add:'Add helper',helper_remove:'Remove helper'};
 function assignmentActions(job,actor){
- if(!ADMINS.includes(actor)||!job.recordId||!job.threadTs||job.status==='done'||job.canceled||job.billingStage)return[];
- const ops=job.techId&&job.assignedMessageUrl?['reassign',job.helperId?'helper_remove':'helper_add']:!job.techId?['assign']:[];
+ if(!ADMINS.includes(actor)||!job.recordId||!job.threadTs||job.status==='done'||job.canceled||job.billingStage||job.workflowChecked&&!job.workflowStage)return[];
+ const ops=job.techId&&job.assignedMessageUrl?['reassign','reschedule',job.helperId?'helper_remove':'helper_add']:!job.techId?['assign','reschedule']:[];
  return ops.map(operation=>({type:'button',action_id:'assignment_open',text:{type:'plain_text',text:LABELS[operation]},value:JSON.stringify({jobNumber:job.jobNumber,operation})}));
 }
 function encodeDraft(draft,key,now=Date.now()){
@@ -24,6 +24,12 @@ function decodeDraft(value,key,actor,now=Date.now()){
 function assignmentModal(job,operation,actor,key,now=Date.now()){
  if(!assignmentActions(job,actor).some(a=>JSON.parse(a.value).operation===operation))throw Error('This assignment action is not available. Refresh the board.');
  const draft={requestId:randomUUID(),actor,operation,jobNumber:job.jobNumber,recordId:job.recordId,incomingTs:job.threadTs,expectedLead:job.techId||null,expectedHelper:job.helperId||null,target:null};
+ if(operation==='reschedule')return{type:'modal',callback_id:'job_assignment',private_metadata:encodeDraft(draft,key,now),title:{type:'plain_text',text:'Reschedule call'},submit:{type:'plain_text',text:'Schedule'},close:{type:'plain_text',text:'Cancel'},blocks:[
+  {type:'section',text:{type:'mrkdwn',text:'*'+job.jobNumber+'*\n'+(job.location||'')+'\nThis moves the call to Future Calls and clears its plumber assignment. All notes and media stay in its Incoming record.'}},
+  {type:'input',block_id:'assignment_date',optional:true,label:{type:'plain_text',text:'Date'},element:{type:'datepicker',action_id:'date',...(job.scheduledFor?.date?{initial_date:job.scheduledFor.date}:{})}},
+  {type:'input',block_id:'assignment_time',optional:true,label:{type:'plain_text',text:'Time (Pacific)'},element:{type:'timepicker',action_id:'time',...(job.scheduledFor?.time?{initial_time:job.scheduledFor.time}:{})}},
+  {type:'actions',elements:[{type:'button',action_id:'assignment_no_date',text:{type:'plain_text',text:'No date/time'},value:encodeDraft({...draft,schedule:{noDate:true}},key,now)}]}
+ ]};
  const options=TECHS.filter(t=>t.id!==job.techId&&t.id!==job.helperId).map(t=>({text:{type:'plain_text',text:t.name},value:t.id}));
  return{type:'modal',callback_id:'job_assignment',private_metadata:encodeDraft(draft,key,now),
  title:{type:'plain_text',text:LABELS[operation]},submit:{type:'plain_text',text:operation==='assign'?'Confirm assignment':'Confirm'},close:{type:'plain_text',text:'Cancel'},
@@ -43,6 +49,16 @@ async function submitAssignment(request,{fetch:fetcher=global.fetch,endpoint=pro
  return body;
 }
 function registerAssignmentHandlers(app,{store,refresh,publishHome,messageModal,submit=submitAssignment,signingKey=()=>process.env.SLACK_SIGNING_SECRET}){
+ const finish=async(request,body,client)=>{
+  let result;try{result=await submit(request);for(let i=0;i<6&&['queued','working'].includes(result.status);i++){await new Promise(r=>setTimeout(r,4000));result=await submit(request,{mode:'status'});}}catch{result={status:'uncertain',error:'The queue response was interrupted. Check the existing call before trying again.'};}
+  const text=result.status==='done'?'✅ Saved. The call history and Job Board have been updated.':result.error||'⏳ Still queued. Refresh shortly; do not repeat the action.';
+  await client.views.update({view_id:body.view.id,view:messageModal('Call update',text)}).catch(()=>{});
+  if(result.status==='done'){await refresh();await publishHome(client,body.user.id).catch(()=>{});}
+ };
+ app.action('assignment_no_date',async({ack,body,action,client})=>{
+  await ack();let request;try{request=decodeDraft(action.value,signingKey(),body.user.id);if(request.operation!=='reschedule'||request.schedule?.noDate!==true)throw Error('Invalid schedule action.');}catch(e){await client.views.update({view_id:body.view.id,view:messageModal('Reschedule',e.message)});return;}
+  await client.views.update({view_id:body.view.id,view:messageModal('Reschedule','⏳ Moving this call to Future Calls without a date…')});await finish(request,body,client);
+ });
  app.action('assignment_open',async({ack,body,action,client})=>{
   await ack();let view;
   try{if(!ADMINS.includes(body.user.id))throw Error('Assignment tools are limited to TPS admins.');const choice=JSON.parse(action.value);const job=store.find(choice.jobNumber);if(!job)throw Error('This call is no longer on the board. Refresh first.');view=assignmentModal(job,choice.operation,body.user.id,signingKey());}
@@ -57,17 +73,10 @@ function registerAssignmentHandlers(app,{store,refresh,publishHome,messageModal,
  });
  app.view('job_assignment',async({ack,body,view,client})=>{
   let request;
-  try{request=decodeDraft(view.private_metadata,signingKey(),body.user.id);if(!request.resume&&request.operation!=='helper_remove'){request.target=view.state.values.assignment_target?.target?.selected_option?.value;if(!TECHS.some(t=>t.id===request.target))throw Error('Choose a current TPS plumber.');}}
+  try{request=decodeDraft(view.private_metadata,signingKey(),body.user.id);if(!request.resume&&request.operation==='reschedule'){const values=view.state.values;const date=values.assignment_date?.date?.selected_date,time=values.assignment_time?.time?.selected_time;if(!date||!time){await ack({response_action:'errors',errors:{...(!date?{assignment_date:'Choose a date, or use No date/time.'}:{}),...(!time?{assignment_time:'Choose a Pacific time, or use No date/time.'}:{})}});return;}request.schedule={date,time};}else if(!request.resume&&request.operation!=='helper_remove'){request.target=view.state.values.assignment_target?.target?.selected_option?.value;if(!TECHS.some(t=>t.id===request.target))throw Error('Choose a current TPS plumber.');}}
   catch(e){await ack({response_action:'update',view:messageModal('Assignment',e.message)});return;}
   await ack({response_action:'update',view:messageModal('Assignment','⏳ Assignment queued. You may close this window; the call history will record the result.')});
-  let result;
-  try{
-   result=await submit(request);
-   for(let i=0;i<6&&['queued','working'].includes(result.status);i++){await new Promise(r=>setTimeout(r,4000));result=await submit(request,{mode:'status'});}
-  }catch{result={status:'uncertain',error:'The queue response was interrupted. Refresh before trying again; do not repeat the action.'};}
-  const text=result.status==='done'?'✅ Saved. The call history and Job Board reflect the assignment.':result.error||'⏳ Still queued. Refresh the Job Board shortly; do not repeat the action.';
-  await client.views.update({view_id:body.view.id,view:messageModal('Assignment',text)}).catch(()=>{});
-  if(result.status==='done'){await refresh();await publishHome(client,body.user.id).catch(()=>{});}
+  await finish(request,body,client);
  });
 }
 module.exports={assignmentActions,assignmentModal,assignmentResumeModal,encodeDraft,decodeDraft,submitAssignment,registerAssignmentHandlers};

@@ -103,16 +103,23 @@ function parseIntake(rawText) {
 const REOPEN = /^\s*(?:Call (?:re)?assigned |:arrows_counterclockwise: Sent to <#|:calendar: \*Rescheduled:|:hourglass_flowing_sand: \*Needs to be scheduled)/;
 
 function parseReplies(replies) {
-  const state = { helperId: null, helperThreads: [], tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false, reopened: false };
+  const state = { helperId: null, helperThreads: [], tech: null, assignedAt: null, visitStartedAt:null,visitDate:null,scheduledFor: null, completed: false, completedAt: null, canceled: false, reopened: false };
   for (const r of replies) {
-    const t = r.text || '';
+    const t = (r.text || '').replace(/\*/g,'');
+    const returned=t.match(/Return on the same unbilled invoice assigned to ([^:]+):/);
+    if(returned&&r.ts){
+      state.completed=false;state.completedAt=null;state.reopened=true;
+      state.tech=returned[1].trim();state.techId=null;
+      state.assignedAt=new Date(Number(r.ts)*1000);state.visitStartedAt=state.assignedAt;
+      state.visitDate=formatSlackDate(r.ts).slice(0,10);state.scheduledFor=null;state.needsDate=false;
+    }
     const helper=t.match(/^TPS helper assigned: <@(U[A-Z0-9]+)>/);
     if(helper){state.helperId=helper[1];const link=t.match(/archives\/(C[A-Z0-9]+)\/p(\d{10})(\d{6})/);if(link)state.helperThreads.push({channel:link[1],ts:link[2]+'.'+link[3]});}
     if(/^TPS helper removed\b/.test(t))state.helperId=null;
 
     // A send-back or (re)assign after a completion means the job was not really finished (Paul 2026-10-26,
     // 132099 needs a return visit): it is open again until the next "Call completed".
-    if (state.completed && REOPEN.test(t)) {
+    if (state.completed && REOPEN.test(r.text||'')) {
       state.completed = false;
       state.completedAt = null;
       state.reopened = true;
@@ -122,21 +129,34 @@ function parseReplies(replies) {
         state.needsDate = true;
       }
     }
-    const a = t.match(/Call (?:assigned|reassigned from [\w .'-]+?) to ([\w .'-]+?) on (\S+)/);
+    const a = t.match(/^Call (?:assigned|reassigned(?: from [\w .'-]+?)?) (?:to )?([\w .'-]+?)(?: on | by |\n|$)/);
     if (a) {
       state.tech = a[1].trim();
-      state.assignedAt = a[2];
+      const at=r.ts?new Date(Number(r.ts)*1000):null;
+      const date=at?formatSlackDate(r.ts).slice(0,10):null;
+      if(/^Call assigned\b/.test(t)){
+        state.visitStartedAt=at;
+        if(date){state.visitDate=state.scheduledFor?.date>=date?state.scheduledFor.date:date;if(state.scheduledFor?.date<date)state.scheduledFor=null;}
+      }else if(!state.visitDate){state.visitDate=state.scheduledFor?.date||date;state.visitStartedAt=state.visitStartedAt||state.assignedAt||at;}
+      state.assignedAt = r.ts ? new Date(Number(r.ts)*1000) : null;
     }
+    const lead=t.match(/TPS lead assigned: <@(U[A-Z0-9]+)>/);
+    if(lead){state.techId=lead[1];state.assignedAt=r.ts?new Date(Number(r.ts)*1000):null;if(!state.visitDate&&r.ts){state.visitDate=state.scheduledFor?.date||formatSlackDate(r.ts).slice(0,10);state.visitStartedAt=state.assignedAt;}}
     const s = t.match(/(?:Scheduled for|Rescheduled:)\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})/);
     if (s) {
       state.scheduledFor = { date: s[1], time: s[2] };
+      state.visitDate=s[1];state.visitStartedAt=null;
       state.needsDate = false;
+      if(/Rescheduled:/i.test(t)){state.tech=null;state.techId=null;state.assignedAt=null;}
     }
     const rs = t.match(/(?:Rescheduled:|Scheduled for)\s+\w+, (\w{3}) (\d{1,2}) at (\d{1,2}):(\d{2}) ([AP]M)/);
     if (rs) {
       state.scheduledFor = fromRescheduled(rs, r.ts);
+      state.visitDate=state.scheduledFor.date;state.visitStartedAt=null;
       state.needsDate = false;
+      if(/Rescheduled:/i.test(t)){state.tech=null;state.techId=null;state.assignedAt=null;}
     }
+    if(/needs to be scheduled/i.test(t)){state.scheduledFor=null;state.needsDate=true;state.tech=null;state.techId=null;state.assignedAt=null;state.visitDate=null;state.visitStartedAt=null;}
     if (/Call completed/i.test(t)) {
       state.completed = true;
       state.reopened = false;
@@ -165,8 +185,10 @@ function fromRescheduled([, mon, day, hour, min, ampm], replyTs) {
 
 function statusOf(job) {
   if (job.completed) return 'done';
-  if (job.scheduledFor) return 'scheduled';
+  if (job.needsDate) return 'needs_date';
+  if (job.pendingCompletion) return 'pending';
   if (job.tech) return 'assigned';
+  if (job.scheduledFor) return 'scheduled';
   return 'new';
 }
 
