@@ -128,10 +128,13 @@ class JobStore {
       if(!job||card.incomingTs&&job.threadTs!==card.incomingTs){
         let parent,recovered=[];
         if(card.incomingTs){recovered=await this.readThread(CHANNEL_ID,card.incomingTs);parent=recovered.find(m=>m.ts===card.incomingTs);}
-        const intake=parseIntake(messageText(parent||card.message));
-        if(card.incomingTs&&(!parent||!new RegExp('(^|\\D)'+number+'(\\D|$)').test(messageText(parent))))throw Error('Current Incoming identity could not be verified.');
+        const parentText=messageText(parent||{}),sourceIntake=parseIntake(messageText(card.message));
+        const row=calls.get(number);
+        const fileOnlyIdentity=parent&&!parentText.trim()&&row?.recordId===card.recordId&&sourceIntake.workOrder&&new RegExp('(^|\\D)'+number+'(\\D|$)').test(row.description||'')&&(row.description||'').includes(sourceIntake.workOrder)&&(parent.files||[]).some(f=>f.name===sourceIntake.workOrder+'.pdf');
+        const intake=parseIntake(parentText.trim()?parentText:messageText(card.message));
+        if(card.incomingTs&&(!parent||!new RegExp('(^|\\D)'+number+'(\\D|$)').test(parentText)&&!fileOnlyIdentity))throw Error('Current Incoming identity could not be verified.');
         job={...job,...intake,...parseReplies(recovered.slice(1).map(m=>({ts:m.ts,text:messageText(m)}))),jobNumber:number,threadTs:card.incomingTs,postedAt:new Date(Number(parent?.ts||card.message.ts)*1000)};
-        const row=calls.get(number);if(row)Object.assign(job,{recordId:row.recordId,workDone:row.workDone});
+        if(row)Object.assign(job,{recordId:row.recordId,workDone:row.workDone});
       }
       if(job.canceled){byNumber.delete(number);continue;}
       job=applyWorkflow(job,card);
