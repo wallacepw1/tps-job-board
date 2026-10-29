@@ -6,9 +6,9 @@ A Slack app that shows every TPS job in one place:
 - **`/jobs`** in any channel opens the board; `/jobs 132174` opens one job; `/jobs eduardo` filters to a tech; `/jobs mine` shows your own jobs.
 - **⚡ Shortcut** "Open job board" from the shortcuts menu.
 
-Each card shows the job #, client, address, issue, status, time and tech, with buttons for the Slack thread, Work Order Files, Google Maps and the calendar.
+Each card shows the job #, client, address, issue, status, time and tech. Unassigned cards offer Thread, Files, Map, Assign and Reschedule. Assigned cards add Tech chat, Add videos/notes, Reassign, Reschedule and Add helper. Done cards offer Thread, Files and Completed. Assignment-changing controls are restricted to admins.
 
-**My jobs** is where a tech's board opens: their open jobs (booked times first) plus whatever they finished today. Once a job is in a tech's channel, its card has **📸 Add photos/notes**, a pop-up that sends photos, videos and notes into that call's thread in the tech's channel, so Call Route copies them along with the call.
+**My jobs** is where a tech's board opens. Once a job is in a tech's channel, **Add videos/notes** sends photos, videos and notes into the lead call's thread, so they stay with the same call history.
 
 ## Where the data comes from
 
@@ -16,12 +16,12 @@ Each card shows the job #, client, address, issue, status, time and tech, with b
 | --- | --- |
 | Job details (client, address, issue, Drive folder) | PaulLatenode intake post in #incoming-calls, or the calendar event description |
 | Appointment time | The job's latest post in #future-calls ("The call is Scheduled for…"), then a "Rescheduled:…" reply in the thread, then the TPS Jobs calendar |
-| Tech | The job's row in the **Calls** Slack list (Assignee, once Assigned is checked), else the "Call assigned to *Name*" reply in the thread |
-| Done | The **Completed** checkbox on the Calls list row (not the to-do checkbox), else a "Call completed" reply in the thread |
+| Current stage and lead | Current live Please Assign, Future, plumber and Completed cards, joined with the Calls row and Incoming history |
+| Done | Current Completed card or verified completion history; later rescheduling or a return visit reopens the call |
 
-Today shows only that day's jobs: ones booked for today and new calls that came in today. Completed jobs stay on Today with a ✅ and drop off the next day. Open calls from the last 7 days are under *All open*. Only rescheduled jobs show a clock time, since intake calendar times are just when the call arrived. If the thread and calendar disagree on the day, the card shows a ⚠️ warning.
+Today shows current unassigned calls, today's scheduled calls, and visits assigned for today. Assigned calls remain Assigned even when they have an appointment. Media plus work comments without Complete gives Pending completion. Done calls appear below active work. A separate Yesterday stuck section keeps yesterday's unfinished visits visible for one day; older stuck visits stay in the history and morning report. Undated Future calls stay in All open and do not appear on Today.
 
-Admins can assign, reassign and manage one linked helper from eligible call cards. The authenticated Latenode worker checks the current Calls row and delegates lead changes to Call Route. Helpers keep the same lead, invoice and Incoming history. Helper photos and notes are verified in Incoming before their channel copy is removed. Data refreshes every 2 minutes.
+Admins can assign, reassign, reschedule and add a helper. Reassignment preserves the visit date and history. Reschedule clears the plumber and moves the call to Future with a date/time or No date/time. A helper receives a link to the lead call and contributes directly to that thread. Older helper copies retain their archive protections. The authenticated worker verifies each change through Call Route. Data refreshes every two minutes and after workflow activity.
 
 Assignment setup and recovery are described in [the deployment guide](docs/assignment-deployment.md). Until the worker and secrets are configured, assignment requests fail visibly without changing a call.
 

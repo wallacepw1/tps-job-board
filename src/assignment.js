@@ -5,7 +5,7 @@ const LABELS={assign:'Assign',reassign:'Reassign',reschedule:'Reschedule',helper
 function assignmentActions(job,actor){
  if(!ADMINS.includes(actor)||!job.recordId||!job.threadTs||job.status==='done'||job.canceled||job.billingStage||job.workflowChecked&&!job.workflowStage)return[];
  const ops=job.techId&&job.assignedMessageUrl?['reassign','reschedule',job.helperId?'helper_remove':'helper_add']:!job.techId?['assign','reschedule']:[];
- return ops.map(operation=>({type:'button',action_id:'assignment_open',text:{type:'plain_text',text:LABELS[operation]},value:JSON.stringify({jobNumber:job.jobNumber,operation})}));
+ return ops.map(operation=>({type:'button',action_id:'assignment_open_'+operation,text:{type:'plain_text',text:LABELS[operation]},value:JSON.stringify({jobNumber:job.jobNumber,operation})}));
 }
 function encodeDraft(draft,key,now=Date.now()){
  if(!key)throw Error('The form signing key is unavailable.');
@@ -59,7 +59,7 @@ function registerAssignmentHandlers(app,{store,refresh,publishHome,messageModal,
   await ack();let request;try{request=decodeDraft(action.value,signingKey(),body.user.id);if(request.operation!=='reschedule'||request.schedule?.noDate!==true)throw Error('Invalid schedule action.');}catch(e){await client.views.update({view_id:body.view.id,view:messageModal('Reschedule',e.message)});return;}
   await client.views.update({view_id:body.view.id,view:messageModal('Reschedule','⏳ Moving this call to Future Calls without a date…')});await finish(request,body,client);
  });
- app.action('assignment_open',async({ack,body,action,client})=>{
+ app.action(/^assignment_open(?:_|$)/,async({ack,body,action,client})=>{
   await ack();let view;
   try{if(!ADMINS.includes(body.user.id))throw Error('Assignment tools are limited to TPS admins.');const choice=JSON.parse(action.value);const job=store.find(choice.jobNumber);if(!job)throw Error('This call is no longer on the board. Refresh first.');view=assignmentModal(job,choice.operation,body.user.id,signingKey());}
   catch(e){view=messageModal('Assignment',e.message);}
