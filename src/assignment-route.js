@@ -14,6 +14,22 @@ async function unwrapAssignment(p,store,now=Date.now()){
 }
 function idsOf(p){const body=JSON.stringify(p.message?.blocks||[]);let meta;try{meta=JSON.parse(p.actions?.[0]?.value||'{}');}catch{}
  return{recordId:body.match(/\btpsref:(Rec[A-Z0-9]+):/i)?.[1]||body.match(/\bRec[A-Z0-9]+\b/i)?.[0]||meta?.recordId,incomingTs:body.match(/\btpsref:Rec[A-Z0-9]+:(\d{10}\.\d{6})/i)?.[1]||body.match(/\b\d{10}\.\d{6}\b/)?.[0]||meta?.incomingTs};}
+async function callFeedback(p,ctx,text){
+ const channel=p.channel?.id||p.container?.channel_id,ts=p.container?.message_ts||p.message?.ts;
+ const recordId=idsOf(p).recordId;if(!channel||!ts||!recordId||!p.message?.blocks)throw Error('Call progress source is unavailable.');
+ const key='TPS_ASSIGN_FEEDBACK_'+recordId;
+ let saved=await ctx.store.getGlobalVariable(key);try{saved=typeof saved==='string'?JSON.parse(saved):saved;}catch{saved=null;}
+ const previous=saved?.channel===channel&&saved?.ts===ts?saved:null;
+ const inProgress=p.message.blocks.some(b=>b.block_id==='tps_assignment_status');
+ if(inProgress&&!previous)throw Error('The original call card could not be recovered.');
+ const message=inProgress?{...p.message,blocks:[...p.message.blocks.filter(b=>b.block_id!=='tps_assignment_status'&&b.type!=='actions'),...previous.message.blocks.filter(b=>b.type==='actions')]}:p.message;
+ saved={channel,ts,requestId:ctx.requestId||previous?.requestId,message};await ctx.store.setGlobalVariable(key,JSON.stringify(saved));
+ const blocks=saved.message.blocks.filter(b=>b.type!=='actions'&&b.block_id!=='tps_assignment_status');
+ blocks.push({type:'section',block_id:'tps_assignment_status',text:{type:'mrkdwn',text}});
+ const r=await ctx.slack('chat.update',{channel,ts,text:saved.message.text||'Call update',blocks});
+ if(!r?.ok)throw Error('Call progress could not be displayed: '+(r?.error||'no response'));
+ return saved.message;
+}
 async function routeChannelAssignment(p,ctx){
  if(ctx.worker)return null;
  const a=p.actions?.[0];const action=a?.action_id||p.view?.callback_id||'';
@@ -47,9 +63,8 @@ async function routeChannelAssignment(p,ctx){
  }
  const requestId=createHash('sha256').update(JSON.stringify([user,action,p.action_ts||a?.action_ts||p.trigger_id||p.view?.hash||'',channel,p.container?.message_ts||p.message?.ts])).digest('hex');
  const body={key:await ctx.store.getGlobalVariable('TPS_INTERNAL_KEY'),mode:open?'open':action==='job_assignment'?'modal_submit':'event_submit',event:p,...ids,shellViewId,requestId};
- const r=await ctx.fetch(hook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- if(!r.ok)throw Error('The assignment queue did not respond.');
- if(!open)await say('⏳ Queued. The call history will record the result; please do not press again.');
+ if(!open&&(/^(assign_|reassign_to_)/.test(action)||completion))await callFeedback(p,{...ctx,requestId},'⏳ Queued. The call change is being processed; please do not press again.');
+ let r;try{r=await ctx.fetch(hook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('The assignment queue did not respond.');}catch(e){if(!open)await callFeedback(p,{...ctx,requestId},'⚠️ Queue response is unconfirmed. Use the Job Board to check this call before retrying.').catch(()=>{});throw e;}
  return{handled:true,queued:true};
 }
-module.exports={unwrapAssignment,routeChannelAssignment,idsOf};
+module.exports={unwrapAssignment,routeChannelAssignment,idsOf,callFeedback};

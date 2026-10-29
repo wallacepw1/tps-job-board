@@ -2,6 +2,8 @@
 const ical = require('node-ical');
 const { parseIntake, parseReplies, statusOf, messageText } = require('./parse');
 const { fetchCallsList } = require('./calls-list');
+const {TECHS}=require('./assignment-policy');
+const {indexWorkflow,applyWorkflow,pendingActivity,cardIdentity}=require('./workflow');
 
 const TZ = process.env.TZ_NAME || 'America/Los_Angeles';
 const CHANNEL_ID = process.env.INCOMING_CHANNEL_ID || 'C0C19TG3KJ6';
@@ -61,9 +63,10 @@ class JobStore {
   }
 
   async refresh() {
-    const [events, posts, future, calls] = await Promise.all([
-      fetchEvents(), this.fetchPosts(), this.fetchFutureCalls(), this.fetchCalls(),
+    const [events, posts, future, calls, workflow] = await Promise.all([
+      this.fetchCalendar(), this.fetchPosts(), this.fetchFutureCalls(), this.fetchCalls(), this.fetchWorkflow(),
     ]);
+    if(this.futureError||this.callsError)throw Error('Live workflow sources could not be read; previous board retained.');
 
     const byNumber = new Map();
     for (const post of posts) {
@@ -108,6 +111,9 @@ class JobStore {
       if (row.assigneeId) {
         job.techId = row.assigneeId;
         job.tech = await this.userName(row.assigneeId);
+      } else {
+        job.techId = null;
+        job.tech = null;
       }
       // A still-checked Completed box must not undo a thread send-back. That job stays open until
       // the next "Call completed"; otherwise it would vanish (done, but with no completion time).
@@ -117,14 +123,37 @@ class JobStore {
       job.workDone = row.workDone;
     }
 
+    for(const [number,card] of workflow){
+      let job=byNumber.get(number);
+      if(!job||card.incomingTs&&job.threadTs!==card.incomingTs){
+        let parent,recovered=[];
+        if(card.incomingTs){recovered=await this.readThread(CHANNEL_ID,card.incomingTs);parent=recovered.find(m=>m.ts===card.incomingTs);}
+        const intake=parseIntake(messageText(parent||card.message));
+        if(card.incomingTs&&(!parent||!new RegExp('(^|\\D)'+number+'(\\D|$)').test(messageText(parent))))throw Error('Current Incoming identity could not be verified.');
+        job={...job,...intake,...parseReplies(recovered.slice(1).map(m=>({ts:m.ts,text:messageText(m)}))),jobNumber:number,threadTs:card.incomingTs,postedAt:new Date(Number(parent?.ts||card.message.ts)*1000)};
+        const row=calls.get(number);if(row)Object.assign(job,{recordId:row.recordId,workDone:row.workDone});
+      }
+      if(job.canceled){byNumber.delete(number);continue;}
+      job=applyWorkflow(job,card);
+      if(job.workflowStage==='assigned'&&!job.completed){
+        const key='lead:'+card.channel+':'+card.message.ts;
+        const version=String(card.message.latest_reply||'')+':'+String(card.message.reply_count||0);
+        let activity=this.threadCache.get(key);
+        if(!activity||activity.version!==version){activity={version,pending:Number(card.message.reply_count||0)>0?pendingActivity(await this.readThread(card.channel,card.message.ts)):false};this.threadCache.set(key,activity);}
+        job.pendingCompletion=activity.pending;
+      }
+      byNumber.set(number,job);
+    }
+
     // A canceled call drops off the board everywhere; its note stays in #incoming-calls.
-    this.jobs = [...byNumber.values()].filter((j) => !j.canceled).map(finalize).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
+    this.jobs = [...byNumber.values()].filter((j) => !j.canceled).map(j=>finalize({...j,workflowChecked:true})).sort((a, b) => (a.when || Infinity) - (b.when || Infinity));
     this.updatedAt = new Date();
     this.stats = {
       updatedAt: this.updatedAt,
       calendarEvents: events.length,
       incomingPosts: posts.length,
       futureCalls: future.size,
+      workflowCards: workflow.size,
       futureError: this.futureError || null,
       callsListRows: calls.size,
       callsListError: this.callsError || null,
@@ -135,6 +164,28 @@ class JobStore {
     };
     console.log('refreshed', JSON.stringify(this.stats));
     return this.jobs;
+  }
+
+  fetchCalendar(){return fetchEvents();}
+
+  invalidateThread(channel,ts){if(!ts)return;this.threadCache.delete(channel===CHANNEL_ID?ts:'lead:'+channel+':'+ts);}
+  invalidateLeadActivity(){for(const key of this.threadCache.keys())if(key.startsWith('lead:'))this.threadCache.delete(key);}
+
+  async readThread(channel,ts){
+    const messages=[];let cursor;
+    do{const r=await this.slack.conversations.replies({channel,ts,limit:200,cursor});messages.push(...r.messages||[]);cursor=r.response_metadata?.next_cursor;if(r.has_more&&!cursor)throw Error('Incomplete call thread; previous board retained.');}while(cursor);
+    return messages;
+  }
+
+  async readWorkflowChannel(channel){
+    const messages=[];let cursor;
+    do{const r=await this.slack.conversations.history({channel,limit:200,cursor});messages.push(...r.messages||[]);cursor=r.response_metadata?.next_cursor;if(r.has_more&&!cursor)throw Error('Incomplete workflow channel; previous board retained.');}while(cursor);
+    return messages;
+  }
+
+  async fetchWorkflow(){
+    const channels=[{role:'assign',channel:process.env.ASSIGN_CHANNEL_ID||'C0C2XUL7ZHN'},{role:'future',channel:FUTURE_CHANNEL_ID},{role:'completed',channel:process.env.COMPLETED_CHANNEL_ID||'C0C2YDBHFFY'},...TECHS.map(tech=>({role:'plumber',channel:tech.channel,tech}))];
+    return indexWorkflow(await Promise.all(channels.map(async c=>({...c,messages:await this.readWorkflowChannel(c.channel)}))));
   }
 
   async fetchPosts() {
@@ -204,8 +255,8 @@ class JobStore {
     if (!post.reply_count) return parseReplies([]);
     const cached = this.threadCache.get(post.ts);
     if (cached && cached.latestReply === post.latest_reply) return cached.state;
-    const res = await this.slack.conversations.replies({ channel: CHANNEL_ID, ts: post.ts, limit: 200 });
-    const state = parseReplies((res.messages || []).slice(1).map((m) => ({ ts: m.ts, text: messageText(m) })));
+    const messages = await this.readThread(CHANNEL_ID,post.ts);
+    const state = parseReplies(messages.slice(1).map((m) => ({ ts: m.ts, text: messageText(m) })));
     this.threadCache.set(post.ts, { latestReply: post.latest_reply, state });
     return state;
   }
@@ -260,17 +311,22 @@ function addFuture(found, msg) {
 function finalize(job) {
   const ev = job.event;
   // Waiting in #future-calls for a date: the calendar's old time is not a booking.
-  const realAppointment = ev && !job.needsDate && !isIntakePlaceholder(ev);
+  const eventDay=ev&&dayKey(new Date(ev.start.dateTime||ev.start.date));
+  const realAppointment = ev && !job.needsDate && !isIntakePlaceholder(ev)&&(!job.visitDate||eventDay>=job.visitDate);
   let when = null;
   let timed = false;
-  if (job.scheduledFor) {
+  if (job.workflowStage === 'new') {
+    when = new Date();
+  } else if (job.workflowStage === 'scheduled' && job.needsDate) {
+    when = null;
+  } else if (job.scheduledFor) {
     when = zonedDate(job.scheduledFor.date, job.scheduledFor.time);
     timed = true;
   } else if (realAppointment) {
     timed = Boolean(ev.start.dateTime);
     when = new Date(ev.start.dateTime || `${ev.start.date}T08:00:00`);
   } else {
-    when = job.postedAt || (ev && !job.needsDate && new Date(ev.start.dateTime || ev.start.date)) || null;
+    when = job.visitDate?zonedDate(job.visitDate,'08:00'):job.assignedAt instanceof Date ? job.assignedAt : job.postedAt || (ev && !job.needsDate && new Date(ev.start.dateTime || ev.start.date)) || null;
   }
   const calendarDay = realAppointment ? dayKey(new Date(ev.start.dateTime || ev.start.date)) : null;
   const mismatch = job.scheduledFor && calendarDay && calendarDay !== job.scheduledFor.date;

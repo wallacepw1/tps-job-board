@@ -17,7 +17,7 @@ const store = { jobs, techs: () => ['Eduardo'], updatedAt: now };
 test('tabs split jobs by day and status', () => {
   // Today = only today's jobs: booked times first, then today's calls. Older open calls go to All open.
   assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' }).map((j) => j.jobNumber), ['132174', '132181']);
-  assert.deepEqual(filterJobs(jobs, { tab: 'open', tech: 'unassigned' }).map((j) => j.jobNumber), ['132181', '132179']);
+  assert.deepEqual(filterJobs(jobs, { tab: 'open', tech: 'unassigned' }).map((j) => j.jobNumber), ['132181']);
   assert.deepEqual(filterJobs(jobs, { tab: 'recent', tech: 'all' }).map((j) => j.jobNumber), ['132162']);
 });
 
@@ -50,10 +50,10 @@ test('Slack schedule times are read as San Diego local time', () => {
 
 test('shows Future calls until a tech is assigned, then Tech chat', () => {
   const { jobBlocks } = require('../src/views');
-  const buttons = (job) => jobBlocks(job)[2].elements.map((e) => e.text.text);
-  const waiting = { jobNumber: '132180', status: 'scheduled', futureTs: '1792712542.021789' };
-  assert.ok(buttons(waiting).includes('Future calls'));
-  const assigned = { ...waiting, assignedMessageUrl: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1792691395739399' };
+  const buttons = (job) => (jobBlocks(job,'U0876C3TEGL')[2].elements||[]).map((e) => e.text.text);
+  const waiting = { jobNumber: '132180', status: 'scheduled', recordId:'RecTEST123',threadTs:'1793220000.000001', futureTs: '1792712542.021789' };
+  assert.ok(buttons(waiting).includes('Assign'));assert.ok(buttons(waiting).includes('Reschedule'));assert.ok(!buttons(waiting).includes('Future calls'));
+  const assigned = { ...waiting,techId:'U0C2MSLLS1L',status:'assigned', assignedMessageUrl: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1792691395739399' };
   assert.ok(buttons(assigned).includes('Tech chat'));
   assert.ok(!buttons(assigned).includes('Future calls'));
 });
@@ -66,12 +66,12 @@ test('My jobs shows only the viewer\'s open jobs plus what they finished today',
     { jobNumber: '4', techId: 'U1', status: 'done', when: new Date(now - 2 * 864e5), timed: false },
     { jobNumber: '5', techId: 'U2', status: 'assigned', when: now, timed: false },
   ];
-  assert.deepEqual(filterJobs(mine, { tab: 'mine', tech: 'all', user: 'U1' }).map((j) => j.jobNumber), ['2', '1', '3']);
+  assert.deepEqual(filterJobs(mine, { tab: 'mine', tech: 'all', user: 'U1' }).map((j) => j.jobNumber), ['2', '3']);
 });
 
 test('assigned open jobs get an Add photos/notes button', () => {
   const { jobBlocks, noteModal } = require('../src/views');
-  const job = { jobNumber: '132180', status: 'assigned', assignedMessageUrl: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1792691395739399' };
+  const job = { jobNumber: '132180',status:'assigned',techId:'U0C2MSLLS1L',threadTs:'1793220000.000001', assignedMessageUrl: 'https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1792691395739399' };
   const add = jobBlocks(job)[2].elements.find((e) => e.action_id === 'addnote_132180');
   assert.equal(add.value, '132180');
   assert.ok(!jobBlocks({ ...job, status: 'done' })[2].elements.some((e) => e.action_id?.startsWith('addnote_')));

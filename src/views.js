@@ -6,6 +6,8 @@ const STATUS = {
   new: { emoji: '🆕', label: 'New' },
   assigned: { emoji: '👷', label: 'Assigned' },
   scheduled: { emoji: '📅', label: 'Scheduled' },
+  pending: { emoji: '🟡', label: 'Pending completion' },
+  needs_date: {emoji:'⏳',label:'Needs scheduling'},
   done: { emoji: '✅', label: 'Done' },
 };
 
@@ -39,6 +41,7 @@ function mapsUrl(job) {
 }
 
 function fmtTime(job, now = new Date()) {
+  if(job.workflowStage==='new')return job.postedAt&&dayKey(job.postedAt)===dayKey(now)?'Came in '+new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',minute:'2-digit'}).format(job.postedAt):'Waiting for assignment';
   if (!job.when) return 'No date';
   const day = (d) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric' }).format(d);
   const clock = (d) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(d);
@@ -47,7 +50,8 @@ function fmtTime(job, now = new Date()) {
   return isToday ? `Came in ${clock(job.when)}` : `Open since ${day(job.when)}`;
 }
 
-const CARRY_DAYS = Number(process.env.CARRY_OVER_DAYS || 7);
+function relativeDay(now,days){const d=new Date(dayKey(now)+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+function yesterdayStuck(job,now){return job.status!=='done'&&!job.needsDate&&job.when&&dayKey(job.when)===relativeDay(now,-1)&&job.workflowStage!=='new';}
 
 // A done job only belongs to the day it was finished (the "Call completed" reply's time). A job finished
 // early, or ticked Completed with no reply, drops off its booked day instead of showing as today's work.
@@ -60,21 +64,23 @@ function doneOn(job, day) {
 function carriedOver(job, today) {
   if (job.status === 'done' || !job.when || !job.threadTs) return false;
   const day = dayKey(job.when);
-  return day < today && Date.now() - job.when < CARRY_DAYS * 864e5;
+  const yesterday=new Date(today+'T12:00:00Z');yesterday.setUTCDate(yesterday.getUTCDate()-1);
+  return day === yesterday.toISOString().slice(0,10);
 }
 
 function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = new Date()) {
   const today = dayKey(now);
-  const tomorrow = dayKey(new Date(now.getTime() + 864e5));
-  const weekEnd = dayKey(new Date(now.getTime() + 7 * 864e5));
+  const tomorrow = relativeDay(now,1);
+  const weekEnd = relativeDay(now,7);
   const weekAgo = now.getTime() - 7 * 864e5;
   let list = jobs.filter((j) => {
+    if(j.workflowChecked&&!j.workflowStage&&j.status!=='done')return false;
     const day = j.when ? dayKey(j.when) : null;
     switch (tab) {
       // The viewer's own jobs: everything still open, plus what they finished today.
-      case 'mine': return (j.techId === user || j.helperId === user) && (j.status !== 'done' || doneOn(j, today));
+      case 'mine': return (j.techId === user || j.helperId === user) && (doneOn(j,today)||j.status!=='done'&&(day===today||yesterdayStuck(j,now)));
       // Today: open jobs for today, then the ones finished today (shown apart, under "Done today").
-      case 'today': return j.status === 'done' ? doneOn(j, today) : day === today;
+      case 'today': return j.status === 'done' ? doneOn(j, today) : day === today||yesterdayStuck(j,now);
       case 'tomorrow': return day === tomorrow && j.status !== 'done';
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
       case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today) || Boolean(j.needsDate));
@@ -84,7 +90,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
   });
   if (tab === 'mine') {
     // Open work first (booked times in order, then the rest oldest first), today's finished jobs last.
-    const rank = (j) => (j.status === 'done' ? 2 : j.timed ? 0 : 1);
+    const rank = j=>yesterdayStuck(j,now)?4:j.status==='done'?3:j.status==='pending'?2:j.status==='assigned'?0:1;
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
     return list;
   }
@@ -92,7 +98,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
   else if (tech !== 'all') list = list.filter((j) => j.tech === tech);
   if (tab === 'today') {
     // Booked times in time order, then today's new calls, then what was finished today.
-    const rank = (j) => (j.status === 'done' ? 2 : j.timed ? 0 : 1);
+    const rank = j=>yesterdayStuck(j,now)?4:j.status==='done'?3:j.status==='pending'?2:j.status==='assigned'?0:1;
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
   }
   if (tab === 'recent') list.sort((a, b) => (b.completedAt || b.when || 0) - (a.completedAt || a.when || 0));
@@ -100,7 +106,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
 }
 
 function jobBlocks(job, actor) {
-  const st = STATUS[job.status];
+  const st = STATUS[job.status]||STATUS.new;
   const title = [`*${job.jobNumber}*`, job.emergency ? '🚨' : null, job.client ? `· ${job.client}` : null]
     .filter(Boolean).join(' ');
   const lines = [
@@ -112,15 +118,13 @@ function jobBlocks(job, actor) {
   const buttons = [
     threadUrl(job) && button('Thread', threadUrl(job), `thread_${job.jobNumber}`),
     // Waiting in #future-calls until a tech is picked; then the tech's channel message takes over.
-    job.assignedMessageUrl
-      ? button('Tech chat', job.assignedMessageUrl, `techmsg_${job.jobNumber}`)
-      : futureUrl(job) && button('Future calls', futureUrl(job), `future_${job.jobNumber}`),
+    job.status!=='done'&&job.techId&&job.assignedMessageUrl&&button('Tech chat',job.assignedMessageUrl,`techmsg_${job.jobNumber}`),
     job.filesUrl && button('Files', job.filesUrl, `files_${job.jobNumber}`),
-    mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
-    job.calendarLink && button('Calendar', job.calendarLink, `cal_${job.jobNumber}`),
+    job.status!=='done'&&mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
+    job.status==='done'&&job.completedMessageUrl&&button('Completed',job.completedMessageUrl,`completed_${job.jobNumber}`),
     // Posts photos and notes into the call's thread in the tech's channel.
     job.assignedMessageUrl && job.status !== 'done' && {
-      type: 'button', text: { type: 'plain_text', text: '📸 Add photos/notes' }, action_id: `addnote_${job.jobNumber}`, value: job.jobNumber,
+      type: 'button', text: { type: 'plain_text', text: '📸 Add videos/notes' }, action_id: `addnote_${job.jobNumber}`, value: job.jobNumber,
     },
     ...assignmentActions(job, actor),
   ].filter(Boolean);
@@ -150,7 +154,7 @@ function truncate(s, n) {
 }
 
 function summary(jobs, now = new Date()) {
-  const todays = filterJobs(jobs, { tab: 'today', tech: 'all' }, now);
+  const todays = filterJobs(jobs, { tab: 'today', tech: 'all' }, now).filter(j=>!yesterdayStuck(j,now));
   const open = todays.filter((j) => j.status !== 'done');
   const done = todays.length - open.length;
   const unassigned = open.filter((j) => !j.tech).length;
@@ -187,6 +191,7 @@ function boardBlocks(store, filters) {
     },
     { type: 'divider' },
   ];
+  if(store.refreshError)blocks.push({type:'section',text:{type:'mrkdwn',text:'⚠️ Refresh could not finish. Showing the last verified board; please refresh before changing a call.'}});
 
   if (!jobs.length) {
     const empty = filters.tab === 'mine' ? '_No jobs assigned to you right now._' : '_No jobs here._';
@@ -196,7 +201,7 @@ function boardBlocks(store, filters) {
   let lastGroup = null;
   for (const job of jobs.slice(0, MAX_JOBS)) {
     if (filters.tab === 'today') {
-      const group = job.status === 'done' ? '✅ Done today' : job.timed ? '📅 Booked times' : '🆕 Today\'s calls';
+      const group=yesterdayStuck(job,new Date())?'⚠️ Yesterday — stuck calls':job.status==='done'?'✅ Done today':job.status==='pending'?'🟡 Pending completion':job.status==='assigned'?'👷 Assigned':'📅 Scheduled & new calls';
       if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
       lastGroup = group;
     }

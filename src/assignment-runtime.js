@@ -3,6 +3,7 @@ const {createHash}=require('node:crypto');
 const {TECHS}=require('./assignment-policy');
 const {parseReplies,messageText}=require('./parse');
 const {createHelperService,revision}=require('./assignment-helper');
+const {callFeedback}=require('./assignment-route');
 const LIST='F0C39RE7HDK',INCOMING='C0C19TG3KJ6',ASSIGN='C0C2XUL7ZHN',FUTURE='C0C2XB4VD1N',COMPLETED='C0C2YDBHFFY';
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 const hash=v=>createHash('sha256').update(String(v)).digest('hex');
@@ -46,7 +47,7 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(now());
   const c={readVerified:true,recordId:record.id,incomingTs:r.incomingTs,jobNumber,lead,helper:null,stage,today,appointmentDate:history.scheduledFor?.date||null,address:messageText(parent).slice(0,1500)};
   // Ineligible stages must reach policy refusal without resolving a stale source card.
-  if(['plumber','unassigned'].includes(stage)){c.source=await sourceFromRecord(record,lead,r);const sourceSchedule=parseReplies([{text:messageText(c.source.message),ts:c.source.ts}]).scheduledFor;if(sourceSchedule)c.appointmentDate=sourceSchedule.date;}
+  if(['plumber','unassigned'].includes(stage)){c.source=await sourceFromRecord(record,lead,r);const sourceState=parseReplies([{text:messageText(c.source.message),ts:c.source.ts}]);if(sourceState.scheduledFor)c.appointmentDate=sourceState.scheduledFor.date;if(sourceState.needsDate||c.source.channel===ASSIGN)c.appointmentDate=null;}
   return c;
  }
  const ctx={authenticated:!!key,serialized,actor,now:()=>now().getTime(),requests:{get:id=>get('TPS_ASSIGN_REQUEST_'+id),set:(id,v)=>set('TPS_ASSIGN_REQUEST_'+id,v)},state:{get:id=>get('TPS_ASSIGN_STATE_'+id),set:(id,v)=>set('TPS_ASSIGN_STATE_'+id,v)},loadCall};
@@ -86,10 +87,13 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   }
  };
  ctx.helper=createHelperService(adapter);
+ ctx.prepareDispatch=async(r,c)=>{c.dispatchMessage=await callFeedback({channel:{id:c.source.channel},container:{message_ts:c.source.ts},message:c.source.message},{store,slack,requestId:r.requestId},'⏳ Processing this call change. The source card will clear after verification.');return c.dispatchMessage;};
  ctx.dispatch=async(r,c)=>{
+  const original=c.dispatchMessage||await ctx.prepareDispatch(r,c);
   const tech=TECHS.find(t=>t.id===r.target);
-  const action=r.operation==='lead_complete'?'complete_call':r.operation==='reassign'?'reassign_to_'+tech.name.toLowerCase():'assign_'+tech.name.toLowerCase();
-  const payload={type:'block_actions',user:{id:r.actor},channel:{id:c.source.channel},container:{channel_id:c.source.channel,message_ts:c.source.ts},message:c.source.message,actions:[{type:'button',action_id:action,text:{type:'plain_text',text:tech?.name||'Complete'},value:'Submit'}]};
+  const action=r.operation==='reschedule'?(r.schedule.noDate?'schedule_later':'schedule_call'):r.operation==='lead_complete'?'complete_call':r.operation==='reassign'?'reassign_to_'+tech.name.toLowerCase():'assign_'+tech.name.toLowerCase();
+  const payload={type:'block_actions',user:{id:r.actor},channel:{id:c.source.channel},container:{channel_id:c.source.channel,message_ts:c.source.ts},message:original,actions:[{type:'button',action_id:action,text:{type:'plain_text',text:tech?.name||'Complete'},value:'Submit'}]};
+  if(r.operation==='reschedule'&&!r.schedule.noDate)payload.state={values:{schedule_pickers:{schedule_date:{type:'datepicker',selected_date:r.schedule.date},schedule_time:{type:'timepicker',selected_time:r.schedule.time}}}};
   const capKey='TPS_ASSIGN_DISPATCH_'+r.requestId;
   const existing=await get(capKey);
   if(existing?.used)throw Error('A dispatched change must be reconciled, never repeated.');
@@ -99,6 +103,11 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
  };
  ctx.verifyDispatch=async(r,c)=>{
   const latest=await loadCall(r);
+  if(r.operation==='reschedule'){
+   if(latest.lead||latest.source?.channel!==FUTURE||latest.stage!=='unassigned')return false;
+   const sourceState=parseReplies([{text:messageText(latest.source.message),ts:latest.source.ts}]);
+   return r.schedule.noDate===true?sourceState.needsDate===true:sourceState.scheduledFor?.date===r.schedule.date&&sourceState.scheduledFor?.time===r.schedule.time;
+  }
   if(r.operation!=='lead_complete')return latest.stage==='plumber'&&latest.lead===r.target&&latest.source.channel===TECHS.find(t=>t.id===r.target)?.channel;
   if(latest.stage!=='completed')return false;
   const rows=await pages('conversations.history',{channel:COMPLETED},'messages');
@@ -107,7 +116,7 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
  ctx.audit=async(r,c,state)=>{
   const marker='tps_assignment_audit:'+r.requestId;const replies=await readThread({channel:INCOMING,ts:c.incomingTs});
   if(replies.some(m=>(m.blocks||[]).some(b=>b.block_id===marker)))return;
-  const text=r.operation==='helper_add'?'TPS helper assigned: <@'+r.target+'> <https://tpsplumbing.slack.com/archives/'+state.helper.channel+'/p'+state.helper.ts.replace('.','')+'|Helper thread>':r.operation==='helper_remove'||r.operation==='helper_done'?'TPS helper removed':r.operation==='lead_complete'?'TPS helper removed — work archived before lead completion':'TPS lead assigned: <@'+r.target+'>';
+  const text=r.operation==='reschedule'?(state.helperRetiredRequest?'TPS helper removed\n':'')+'TPS call rescheduled: '+(r.schedule.noDate?'needs to be scheduled':r.schedule.date+' '+r.schedule.time+' Pacific'):r.operation==='helper_add'?'TPS helper assigned: <@'+r.target+'> <https://tpsplumbing.slack.com/archives/'+state.helper.channel+'/p'+state.helper.ts.replace('.','')+'|Helper thread>':r.operation==='helper_remove'||r.operation==='helper_done'?'TPS helper removed':r.operation==='lead_complete'?'TPS helper removed — work archived before lead completion':'TPS lead assigned: <@'+r.target+'>';
   await api('chat.postMessage',{channel:INCOMING,thread_ts:c.incomingTs,text:text+' by <@'+r.actor+'>',blocks:[{type:'section',block_id:marker,text:{type:'mrkdwn',text:text+' by <@'+r.actor+'>'}}],unfurl_links:false});
  };
  ctx.reconcileEvent=async event=>{

@@ -72,7 +72,7 @@ test('reads tech, schedule and completion from thread replies', () => {
   ]);
   assert.equal(s.tech, 'Eduardo');
   assert.deepEqual(s.scheduledFor, { date: '2026-10-23', time: '09:00' });
-  assert.equal(statusOf(s), 'scheduled');
+  assert.equal(statusOf(s), 'assigned'); // An appointment does not erase the assigned plumber.
   assert.equal(statusOf({ ...s, completed: true }), 'done');
   assert.equal(statusOf({}), 'new');
 });

@@ -6,6 +6,7 @@ const { homeView, modalView, jobModal, noteModal, messageModal, TABS } = require
 const { registerAssignmentHandlers } = require('./assignment');
 const { registerCallActionsProxy } = require('./call-actions-proxy');
 const { registerHelperEvents } = require('./helper-events');
+const {TECHS}=require('./assignment-policy');
 
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
@@ -17,21 +18,24 @@ receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
 const store = new JobStore(app.client);
 const userFilters = new Map(); // userId -> { tab, tech }
+const homeViewers=new Map();
 
 // Techs open on their own jobs; everyone else on Today.
 function filtersFor(user) {
-  return userFilters.get(user) || { tab: store.isTech(user) ? 'mine' : 'today', tech: 'all', user };
+  return {...(userFilters.get(user)||{tab:store.isTech(user)?'mine':'today',tech:'all'}),user};
 }
 
 let refreshing = null;
+let refreshAgain=false;
 function refresh() {
-  refreshing = refreshing || store.refresh().catch((e) => console.error('refresh failed', e)).finally(() => { refreshing = null; });
+  if(refreshing){refreshAgain=true;return refreshing;}
+  refreshing = store.refresh().then(async()=>{store.refreshError=null;await Promise.allSettled([...homeViewers].filter(([,at])=>Date.now()-at<864e5).map(([user])=>publishHome(app.client,user)));}).catch((e) => {store.refreshError=e.message;console.error('refresh failed', e);}).finally(() => { refreshing = null;if(refreshAgain){refreshAgain=false;refresh();} });
   return refreshing;
 }
 
 async function ready() {
   if (!store.updatedAt) await refresh();
-  else if (Date.now() - store.updatedAt > REFRESH_MS) refresh(); // serve cached data, update in background
+  else if (Date.now() - store.updatedAt > REFRESH_MS) await refresh();
 }
 
 async function publishHome(client, user) {
@@ -53,6 +57,7 @@ registerHelperEvents(app);
 
 app.event('app_home_opened', async ({ event, client }) => {
   if (event.tab !== 'home') return;
+  homeViewers.set(event.user,Date.now());
   await ready();
   await publishHome(client, event.user);
 });
@@ -74,6 +79,7 @@ app.action('tech_filter', async ({ ack, body, action, client }) => {
 
 app.action('refresh', async ({ ack, body, client }) => {
   await ack();
+  store.invalidateLeadActivity();
   await refresh();
   await rerender(body, client);
 });
@@ -82,7 +88,7 @@ app.action(/^addnote_/, async ({ ack, body, action, client }) => {
   await ack();
   const job = store.find(action.value);
   const view = job?.assignedMessageUrl
-    ? noteModal(job.helperId === body.user.id && job.helperThreads?.length ? { ...job, assignedMessageUrl: `https://tpsplumbing.slack.com/archives/${job.helperThreads.at(-1).channel}/p${job.helperThreads.at(-1).ts.replace('.','')}` } : job)
+    ? noteModal(job)
     : messageModal('Add photos/notes', `Job ${action.value} isn't assigned to a tech channel yet, so there's no thread to send to.`);
   if (body.view?.type === 'modal') await client.views.push({ trigger_id: body.trigger_id, view });
   else await client.views.open({ trigger_id: body.trigger_id, view });
@@ -132,7 +138,11 @@ async function postToThread(client, { url, user, notes, files }) {
 }
 
 // Link buttons still send an action; acknowledge them so Slack shows no error.
-app.action(/^(thread|techmsg|future|files|map|cal)_/, async ({ ack }) => ack());
+app.action(/^(thread|techmsg|future|files|map|cal|completed)_/, async ({ ack }) => ack());
+
+const watchedChannels=new Set(['C0C19TG3KJ6','C0C2XUL7ZHN','C0C2XB4VD1N','C0C2YDBHFFY',...TECHS.map(t=>t.channel)]);
+let boardRefreshTimer;
+app.event('message',async({event})=>{if(!watchedChannels.has(event.channel))return;const message=event.message||event;store.invalidateThread(event.channel,message.thread_ts||event.thread_ts||message.ts);clearTimeout(boardRefreshTimer);boardRefreshTimer=setTimeout(()=>refresh(),2000);boardRefreshTimer.unref?.();});
 
 app.command('/jobs', async ({ ack, command, client }) => {
   await ack();
