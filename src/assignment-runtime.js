@@ -2,7 +2,7 @@
 const {createHash}=require('node:crypto');
 const {TECHS}=require('./assignment-policy');
 const {parseReplies,messageText}=require('./parse');
-const {createHelperService}=require('./assignment-helper');
+const {createHelperService,revision}=require('./assignment-helper');
 const LIST='F0C39RE7HDK',INCOMING='C0C19TG3KJ6',ASSIGN='C0C2XUL7ZHN',FUTURE='C0C2XB4VD1N',COMPLETED='C0C2YDBHFFY';
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 const hash=v=>createHash('sha256').update(String(v)).digest('hex');
@@ -82,7 +82,7 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   copy:copyContribution||(async(m,d,ref)=>{const {copyHelperContribution}=require('./assignment-files');return copyHelperContribution(m,d,ref,{api,pages,get,set,hash,files,fetch:fetcher});}),
   verifyCopies:async(c,h)=>{
    const {copyHelperContribution}=require('./assignment-files');
-   for(const m of (await readThread(h)).slice(1))for(const d of [{channel:INCOMING,ts:c.incomingTs},...(c.source?[c.source]:[])]){const check=await copyHelperContribution(m,d,{sourceChannel:h.channel,sourceTs:m.ts,revision:hash(JSON.stringify([m.ts,m.user||'',m.text||'',m.blocks||[],(m.files||[]).map(f=>f.id).sort()])),helper:h.user,recordId:c.recordId},{api,pages,get,set,hash,files,fetch:fetcher,verifyOnly:true});if(!check.verified)return false;}return true;
+   for(const m of (await readThread(h)).slice(1))for(const d of [{channel:INCOMING,ts:c.incomingTs},...(c.source?[c.source]:[])]){const check=await copyHelperContribution(m,d,{sourceChannel:h.channel,sourceTs:m.ts,revision:hash(revision(m)),helper:h.user,recordId:c.recordId},{api,pages,get,set,hash,files,fetch:fetcher,verifyOnly:true});if(!check.verified)return false;}return true;
   }
  };
  ctx.helper=createHelperService(adapter);

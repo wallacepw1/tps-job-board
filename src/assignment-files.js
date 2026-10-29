@@ -10,14 +10,19 @@ async function copyHelperContribution(m,d,ref,a){
  const rows=await a.pages('conversations.replies',{channel:d.channel,ts:d.ts},'messages');
  for(let i=0;i<parts.length;i++){
   const tag=marker+':'+i;const value=parts[i]+(i===parts.length-1&&d.channel!==INCOMING&&photoLinks?'\n'+photoLinks:'');
+  const links=i===parts.length-1&&d.channel!==INCOMING&&photoLinks?photoLinks.slice(0,2900):null;
+  const matches=x=>{
+   const blocks=x.blocks||[],index=blocks.findIndex(b=>b.block_id===tag);
+   return index>=0&&blocks[index].text?.text===parts[i]&&(!links||blocks[index+1]?.text?.text===links);
+  };
   const existing=rows.find(x=>(x.blocks||[]).some(b=>b.block_id===tag));
-  if(existing){if(existing.text!==value)return{verified:false};continue;}
+  if(existing){if(!matches(existing))return{verified:false};continue;}
   if(a.verifyOnly)return{verified:false};
   const blocks=[{type:'section',block_id:tag,text:{type:'mrkdwn',text:parts[i]}}];
   if(i===parts.length-1&&d.channel!==INCOMING&&photoLinks)blocks.push({type:'section',text:{type:'mrkdwn',text:photoLinks.slice(0,2900)}});
   await a.api('chat.postMessage',{channel:d.channel,thread_ts:d.ts,text:value,blocks,unfurl_links:false});
   const confirmed=await a.pages('conversations.replies',{channel:d.channel,ts:d.ts},'messages');
-  if(!confirmed.some(x=>x.text===value&&(x.blocks||[]).some(b=>b.block_id===tag)))throw Error('Copied helper text was not visible in destination.');
+  if(!confirmed.some(matches))throw Error('Copied helper text was not visible in destination.');
  }
  if(d.channel!==INCOMING)return{verified:true};
  for(const original of m.files||[]){
