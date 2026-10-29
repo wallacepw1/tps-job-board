@@ -1,5 +1,6 @@
 // Block Kit layouts for the Home tab, the /jobs modal and single-job details.
 const { dayKey, TZ } = require('./jobs');
+const { assignmentActions } = require('./assignment');
 
 const STATUS = {
   new: { emoji: '🆕', label: 'New' },
@@ -71,7 +72,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
     const day = j.when ? dayKey(j.when) : null;
     switch (tab) {
       // The viewer's own jobs: everything still open, plus what they finished today.
-      case 'mine': return j.techId === user && (j.status !== 'done' || doneOn(j, today));
+      case 'mine': return (j.techId === user || j.helperId === user) && (j.status !== 'done' || doneOn(j, today));
       // Today: open jobs for today, then the ones finished today (shown apart, under "Done today").
       case 'today': return j.status === 'done' ? doneOn(j, today) : day === today;
       case 'tomorrow': return day === tomorrow && j.status !== 'done';
@@ -98,7 +99,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
   return list;
 }
 
-function jobBlocks(job) {
+function jobBlocks(job, actor) {
   const st = STATUS[job.status];
   const title = [`*${job.jobNumber}*`, job.emergency ? '🚨' : null, job.client ? `· ${job.client}` : null]
     .filter(Boolean).join(' ');
@@ -121,6 +122,7 @@ function jobBlocks(job) {
     job.assignedMessageUrl && job.status !== 'done' && {
       type: 'button', text: { type: 'plain_text', text: '📸 Add photos/notes' }, action_id: `addnote_${job.jobNumber}`, value: job.jobNumber,
     },
+    ...assignmentActions(job, actor),
   ].filter(Boolean);
 
   const meta = [
@@ -128,6 +130,7 @@ function jobBlocks(job) {
     `🕘 ${fmtTime(job)}`,
     `👷 ${job.tech || '_Unassigned_'}`,
     job.workOrder ? `WO ${job.workOrder}` : null,
+    job.helperId ? `Helper: <@${job.helperId}>` : null,
     job.mismatch ? '⚠️ Slack and calendar dates differ' : null,
   ].filter(Boolean);
 
@@ -197,7 +200,7 @@ function boardBlocks(store, filters) {
       if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
       lastGroup = group;
     }
-    blocks.push(...jobBlocks(job));
+    blocks.push(...jobBlocks(job, filters.user));
   }
   if (jobs.length > MAX_JOBS) {
     blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${jobs.length - MAX_JOBS} more. Filter by tech to narrow the list.` }] });
@@ -257,12 +260,12 @@ function modalView(store, filters) {
   };
 }
 
-function jobModal(job) {
+function jobModal(job, actor) {
   return {
     type: 'modal',
     title: { type: 'plain_text', text: `Job ${job.jobNumber}` },
     close: { type: 'plain_text', text: 'Close' },
-    blocks: jobBlocks(job),
+    blocks: jobBlocks(job, actor),
   };
 }
 

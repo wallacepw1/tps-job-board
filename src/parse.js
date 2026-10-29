@@ -103,9 +103,13 @@ function parseIntake(rawText) {
 const REOPEN = /^\s*(?:Call (?:re)?assigned |:arrows_counterclockwise: Sent to <#|:calendar: \*Rescheduled:|:hourglass_flowing_sand: \*Needs to be scheduled)/;
 
 function parseReplies(replies) {
-  const state = { tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false, reopened: false };
+  const state = { helperId: null, helperThreads: [], tech: null, assignedAt: null, scheduledFor: null, completed: false, completedAt: null, canceled: false, reopened: false };
   for (const r of replies) {
     const t = r.text || '';
+    const helper=t.match(/^TPS helper assigned: <@(U[A-Z0-9]+)>/);
+    if(helper){state.helperId=helper[1];const link=t.match(/archives\/(C[A-Z0-9]+)\/p(\d{10})(\d{6})/);if(link)state.helperThreads.push({channel:link[1],ts:link[2]+'.'+link[3]});}
+    if(/^TPS helper removed\b/.test(t))state.helperId=null;
+
     // A send-back or (re)assign after a completion means the job was not really finished (Paul 2026-10-26,
     // 132099 needs a return visit): it is open again until the next "Call completed".
     if (state.completed && REOPEN.test(t)) {

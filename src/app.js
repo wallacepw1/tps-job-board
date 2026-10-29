@@ -1,12 +1,16 @@
-// TPS Job Board: Slack Home tab, /jobs command and shortcut. The board is read-only; the one thing it
-// writes is a tech's photos and notes, into the call's thread in their channel.
+// TPS Job Board: Slack Home, /jobs, notes and authenticated admin assignment requests.
 const { App, ExpressReceiver } = require('@slack/bolt');
 const { JobStore } = require('./jobs');
 const { homeView, modalView, jobModal, noteModal, messageModal, TABS } = require('./views');
 
+const { registerAssignmentHandlers } = require('./assignment');
+const { registerCallActionsProxy } = require('./call-actions-proxy');
+const { registerHelperEvents } = require('./helper-events');
+
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
 const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_SECRET });
+registerCallActionsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
@@ -44,6 +48,9 @@ async function rerender(body, client) {
   }
 }
 
+registerAssignmentHandlers(app, { store, refresh, publishHome, messageModal });
+registerHelperEvents(app);
+
 app.event('app_home_opened', async ({ event, client }) => {
   if (event.tab !== 'home') return;
   await ready();
@@ -75,7 +82,7 @@ app.action(/^addnote_/, async ({ ack, body, action, client }) => {
   await ack();
   const job = store.find(action.value);
   const view = job?.assignedMessageUrl
-    ? noteModal(job)
+    ? noteModal(job.helperId === body.user.id && job.helperThreads?.length ? { ...job, assignedMessageUrl: `https://tpsplumbing.slack.com/archives/${job.helperThreads.at(-1).channel}/p${job.helperThreads.at(-1).ts.replace('.','')}` } : job)
     : messageModal('Add photos/notes', `Job ${action.value} isn't assigned to a tech channel yet, so there's no thread to send to.`);
   if (body.view?.type === 'modal') await client.views.push({ trigger_id: body.trigger_id, view });
   else await client.views.open({ trigger_id: body.trigger_id, view });
@@ -140,7 +147,7 @@ app.command('/jobs', async ({ ack, command, client }) => {
   if (/^\d{5,7}$/.test(arg)) {
     const job = store.find(arg);
     if (job) {
-      await client.views.open({ trigger_id: command.trigger_id, view: jobModal(job) });
+      await client.views.open({ trigger_id: command.trigger_id, view: jobModal(job, command.user_id) });
     } else {
       await client.chat.postEphemeral({ channel: command.channel_id, user: command.user_id, text: `I couldn't find job ${arg} in the last few weeks of #incoming-calls or the TPS Jobs calendar.` });
     }

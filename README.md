@@ -21,7 +21,9 @@ Each card shows the job #, client, address, issue, status, time and tech, with b
 
 Today shows only that day's jobs: ones booked for today and new calls that came in today. Completed jobs stay on Today with a ✅ and drop off the next day. Open calls from the last 7 days are under *All open*. Only rescheduled jobs show a clock time, since intake calendar times are just when the call arrived. If the thread and calendar disagree on the day, the card shows a ⚠️ warning.
 
-The app never edits the calendar, the Calls list or anyone's posts. The only thing it writes is a tech's photos and notes, as replies in the call's thread in their channel. Data refreshes every 2 minutes.
+Admins can assign, reassign and manage one linked helper from eligible call cards. The authenticated Latenode worker checks the current Calls row and delegates lead changes to Call Route. Helpers keep the same lead, invoice and Incoming history. Helper photos and notes are verified in Incoming before their channel copy is removed. Data refreshes every 2 minutes.
+
+Assignment setup and recovery are described in [the deployment guide](docs/assignment-deployment.md). Until the worker and secrets are configured, assignment requests fail visibly without changing a call.
 
 ## Setup
 
