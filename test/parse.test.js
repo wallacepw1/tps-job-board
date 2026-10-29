@@ -209,3 +209,5 @@ test('a return visit takes the new date or drops the old one, and a checked Call
   assert.equal(finished.completed, true);
   assert.equal(applyListCompleted({ completed: false }, true).completed, true);
 });
+
+test('helper history changes helper membership without changing the lead',()=>{const {parseReplies}=require('../src/parse');const r=parseReplies([{text:'Call assigned to Esteban on 2026-10-28'},{text:'TPS helper assigned: <@U0C2MSLLS1L> <https://tpsplumbing.slack.com/archives/C0C1M4CRKSB/p1793220001000001|Helper thread>'}]);assert.equal(r.tech,'Esteban');assert.equal(r.helperId,'U0C2MSLLS1L');assert.equal(r.helperThreads.length,1);const done=parseReplies([{text:'TPS helper assigned: <@U0C2MSLLS1L>'},{text:'TPS helper removed by <@U0876C3TEGL>'}]);assert.equal(done.helperId,null)});

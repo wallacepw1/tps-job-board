@@ -18,3 +18,10 @@ services:
         value: C0C19TG3KJ6
       - key: TZ_NAME
         value: America/Los_Angeles
+
+      - key: TPS_CALL_ACTIONS_URL
+        sync: false
+      - key: TPS_INTERNAL_KEY
+        sync: false
+      - key: TPS_CALL_ROUTE_SIGNING_SECRET
+        sync: false

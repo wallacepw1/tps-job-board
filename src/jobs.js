@@ -112,6 +112,7 @@ class JobStore {
       // A still-checked Completed box must not undo a thread send-back. That job stays open until
       // the next "Call completed"; otherwise it would vanish (done, but with no completion time).
       applyListCompleted(job, row.completed);
+      job.recordId = row.recordId;
       job.assignedMessageUrl = row.assignedMessageUrl;
       job.workDone = row.workDone;
     }
@@ -215,7 +216,7 @@ class JobStore {
 
   // True when this Slack user is the assigned tech on any job, so their board opens on My jobs.
   isTech(userId) {
-    return this.jobs.some((j) => j.techId === userId);
+    return this.jobs.some((j) => j.techId === userId || j.helperId === userId);
   }
 
   techs() {
