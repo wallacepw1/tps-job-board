@@ -5,6 +5,7 @@ const { homeView, modalView, jobModal, noteModal, messageModal, TABS } = require
 
 const { registerAssignmentHandlers } = require('./assignment');
 const { registerCallActionsProxy } = require('./call-actions-proxy');
+const { registerAssistantEventsProxy } = require('./assistant-events-proxy');
 const { registerHelperEvents } = require('./helper-events');
 const {TECHS}=require('./assignment-policy');
 
@@ -12,6 +13,7 @@ const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
 const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_SECRET });
 registerCallActionsProxy(receiver);
+registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
@@ -181,3 +183,4 @@ app.shortcut('open_job_board', async ({ ack, shortcut, client }) => {
   refresh();
   setInterval(refresh, REFRESH_MS);
 })();
+
