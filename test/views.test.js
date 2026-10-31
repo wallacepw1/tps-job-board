@@ -112,3 +112,20 @@ test('a newer "no date yet" #future-calls post clears the old date and the TO SC
   assert.ok(!filterJobs([{ ...job, status: 'new' }], { tab: 'today', tech: 'all' }).length || dayKey(job.when) === today);
   assert.equal(filterJobs([{ ...job, status: 'new' }], { tab: 'open', tech: 'all' }).length, 1);
 });
+
+test('stuck calls tab lists open calls from earlier days, oldest first', () => {
+  const old = { jobNumber: '132228', status: 'assigned', tech: 'Eduardo', when: new Date(now - 4 * 864e5), timed: false, threadTs: '1793297212.827489' };
+  const list = filterJobs([...jobs, old], { tab: 'stuck', tech: 'all' }).map((j) => j.jobNumber);
+  // 132179 (2 days, has thread) and 132228 (4 days) are stuck; calendar-only 131000, done 132162 and today's calls are not.
+  assert.deepEqual(list, ['132228', '132179']);
+  const view = homeView({ ...store, jobs: [...jobs, old] }, { tab: 'stuck', tech: 'all' });
+  assert.match(JSON.stringify(view), /Check and resume/);
+  assert.match(JSON.stringify(view), /find_job/);
+});
+
+test('find a call pop-up asks for a call number', () => {
+  const { findModal } = require('../src/views');
+  const view = findModal();
+  assert.equal(view.callback_id, 'job_find');
+  assert.equal(view.blocks[0].block_id, 'job');
+});

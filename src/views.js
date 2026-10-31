@@ -14,6 +14,7 @@ const STATUS = {
 const TABS = [
   { id: 'mine', label: 'My jobs' },
   { id: 'today', label: 'Today' },
+  { id: 'stuck', label: '⚠️ Stuck calls' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'week', label: 'This week' },
   { id: 'open', label: 'All open' },
@@ -68,6 +69,12 @@ function carriedOver(job, today) {
   return day === yesterday.toISOString().slice(0,10);
 }
 
+// Stuck: still open from any earlier day. Only calls with an #incoming-calls thread count, since a
+// calendar-only entry has nothing that could ever mark it done.
+function stuckCall(job, today) {
+  return job.status !== 'done' && !job.needsDate && Boolean(job.when) && Boolean(job.threadTs) && dayKey(job.when) < today;
+}
+
 function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = new Date()) {
   const today = dayKey(now);
   const tomorrow = relativeDay(now,1);
@@ -84,6 +91,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
       case 'tomorrow': return day === tomorrow && j.status !== 'done';
       case 'week': return day && day >= today && day <= weekEnd && j.status !== 'done';
       case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today) || Boolean(j.needsDate));
+      case 'stuck': return stuckCall(j, today);
       case 'recent': return j.status === 'done' && (j.completedAt || j.when || j.postedAt || 0) >= weekAgo;
       default: return true;
     }
@@ -101,6 +109,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
     const rank = j=>yesterdayStuck(j,now)?4:j.status==='done'?3:j.status==='pending'?2:j.status==='assigned'?0:1;
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
   }
+  if (tab === 'stuck') list.sort((a, b) => (a.when || 0) - (b.when || 0));
   if (tab === 'recent') list.sort((a, b) => (b.completedAt || b.when || 0) - (a.completedAt || a.when || 0));
   return list;
 }
@@ -187,14 +196,18 @@ function boardBlocks(store, filters) {
       elements: [
         { type: 'static_select', action_id: 'tech_filter', options: techOptions, initial_option: selected },
         { type: 'button', action_id: 'refresh', text: { type: 'plain_text', text: '🔄 Refresh' } },
+        { type: 'button', action_id: 'find_job', text: { type: 'plain_text', text: '🔎 Find a call' } },
       ],
     },
     { type: 'divider' },
   ];
   if(store.refreshError)blocks.push({type:'section',text:{type:'mrkdwn',text:'⚠️ Refresh could not finish. Showing the last verified board; please refresh before changing a call.'}});
 
+  if (filters.tab === 'stuck') {
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'Calls still open from an earlier day, oldest first. If a call\'s Slack card says *Another action is still being verified*, press *Reassign* (or *Assign*) here; the pop-up offers *Check and resume*, which confirms the earlier action and unlocks the call.' }] });
+  }
   if (!jobs.length) {
-    const empty = filters.tab === 'mine' ? '_No jobs assigned to you right now._' : '_No jobs here._';
+    const empty = filters.tab === 'mine' ? '_No jobs assigned to you right now._' : filters.tab === 'stuck' ? '_No stuck calls. 🎉_' : '_No jobs here._';
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: empty } });
   }
   const today = dayKey(new Date());
@@ -250,6 +263,24 @@ function messageModal(title, text) {
   };
 }
 
+// Pop-up to look up any call on the board by its number.
+function findModal(error) {
+  return {
+    type: 'modal',
+    callback_id: 'job_find',
+    title: { type: 'plain_text', text: 'Find a call' },
+    submit: { type: 'plain_text', text: 'Find' },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      {
+        type: 'input', block_id: 'job', label: { type: 'plain_text', text: 'Call number' },
+        element: { type: 'plain_text_input', action_id: 'number', placeholder: { type: 'plain_text', text: 'e.g. 132228' } },
+      },
+      ...(error ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: error }] }] : []),
+    ],
+  };
+}
+
 function homeView(store, filters) {
   return { type: 'home', private_metadata: JSON.stringify(filters), blocks: boardBlocks(store, filters) };
 }
@@ -274,4 +305,4 @@ function jobModal(job, actor) {
   };
 }
 
-module.exports = { homeView, modalView, jobModal, noteModal, messageModal, filterJobs, jobBlocks, TABS };
+module.exports = { homeView, modalView, jobModal, noteModal, messageModal, findModal, filterJobs, jobBlocks, TABS };

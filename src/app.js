@@ -1,7 +1,7 @@
 // TPS Job Board: Slack Home, /jobs, notes and authenticated admin assignment requests.
 const { App, ExpressReceiver } = require('@slack/bolt');
 const { JobStore } = require('./jobs');
-const { homeView, modalView, jobModal, noteModal, messageModal, TABS } = require('./views');
+const { homeView, modalView, jobModal, noteModal, messageModal, findModal, TABS } = require('./views');
 
 const { registerAssignmentHandlers } = require('./assignment');
 const { registerCallActionsProxy } = require('./call-actions-proxy');
@@ -84,6 +84,28 @@ app.action('refresh', async ({ ack, body, client }) => {
   store.invalidateLeadActivity();
   await refresh();
   await rerender(body, client);
+});
+
+app.action('find_job', async ({ ack, body, client }) => {
+  await ack();
+  const view = findModal();
+  if (body.view?.type === 'modal') await client.views.push({ trigger_id: body.trigger_id, view });
+  else await client.views.open({ trigger_id: body.trigger_id, view });
+});
+
+app.view('job_find', async ({ ack, body, view }) => {
+  const number = (view.state.values.job?.number?.value || '').replace(/\D/g, '');
+  if (!/^\d{5,7}$/.test(number)) {
+    await ack({ response_action: 'errors', errors: { job: 'Type a call number, like 132228.' } });
+    return;
+  }
+  // Slack needs an answer within 3 seconds, so search the board as it stands.
+  const job = store.find(number);
+  if (!job) {
+    await ack({ response_action: 'errors', errors: { job: `I couldn't find ${number} in the last few weeks of #incoming-calls or the TPS Jobs calendar.` } });
+    return;
+  }
+  await ack({ response_action: 'update', view: jobModal(job, body.user.id) });
 });
 
 app.action(/^addnote_/, async ({ ack, body, action, client }) => {
