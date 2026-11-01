@@ -1,0 +1,7 @@
+const test=require('node:test'),assert=require('node:assert/strict');const {registerRundownRefresh,requestRefresh,ACTION_ID}=require('../src/rundown-refresh');
+function setup(fetch,key='secret'){const h={},eph=[];registerRundownRefresh({action:(id,fn)=>h[id]=fn},{key,url:'https://webhook.latenode.com/test',fetch});return{h,eph,client:{chat:{postEphemeral:async m=>{eph.push(m)}}}};}
+const body={user:{id:'U0876C3TEGL'},channel:{id:'D123'}};
+test('acks and forwards jb_refresh with key and user',async()=>{const sent=[];const s=setup(async(u,p)=>{sent.push({u,b:JSON.parse(p.body)});return{ok:true,text:async()=>'{"ok":true,"deleted":3,"posted":2}'}});let acked=0;await s.h[ACTION_ID]({ack:async()=>{acked++},body,client:s.client});assert.equal(acked,1);assert.deepEqual(sent[0].b,{key:'secret',action:'jb_refresh',user:'U0876C3TEGL'});assert.equal(s.eph.length,0)});
+test('shows an ephemeral note when Latenode refuses',async()=>{const s=setup(async()=>({ok:true,text:async()=>'{"ok":false,"error":"not admin"}'}));await s.h[ACTION_ID]({ack:async()=>{},body,client:s.client});assert.equal(s.eph.length,1);assert.match(s.eph[0].text,/not admin/)});
+test('network failure is reported, not thrown',async()=>{const s=setup(async()=>{throw Error('down')});await s.h[ACTION_ID]({ack:async()=>{},body,client:s.client});assert.match(s.eph[0].text,/could not be reached/)});
+test('missing key makes no request',async()=>{let calls=0;const out=await requestRefresh('U1',{key:'',fetch:async()=>{calls++}});assert.equal(calls,0);assert.equal(out.ok,false)});
