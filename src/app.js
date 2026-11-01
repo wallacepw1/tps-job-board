@@ -7,6 +7,7 @@ const { registerAssignmentHandlers } = require('./assignment');
 const { registerCallActionsProxy } = require('./call-actions-proxy');
 const { registerAssistantEventsProxy } = require('./assistant-events-proxy');
 const { registerHelperEvents } = require('./helper-events');
+const { registerRundownRefresh } = require('./rundown-refresh');
 const {TECHS}=require('./assignment-policy');
 
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
@@ -56,6 +57,7 @@ async function rerender(body, client) {
 
 registerAssignmentHandlers(app, { store, refresh, publishHome, messageModal });
 registerHelperEvents(app);
+registerRundownRefresh(app);
 
 app.event('app_home_opened', async ({ event, client }) => {
   if (event.tab !== 'home') return;
