@@ -1,5 +1,6 @@
 'use strict';
 const {verifySlackRequest}=require('./call-actions-proxy');
+const {assistantMeldRequest}=require('./assistant-meld-relay');
 const TARGET='https://webhook.latenode.com/27333/prod/media-bot-slack-events';
 function parseAssistantBody(raw){
  try{return JSON.parse(raw);}catch{
@@ -28,13 +29,20 @@ function registerAssistantEventsProxy(receiver,options={}){
    if(!verifySlackRequest(raw,req.headers,options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET))return res.status(401).send('Request could not be verified.');
    const body=parseAssistantBody(raw);
    if(body.type==='url_verification')return res.status(200).send(body.challenge);
+   const meld=assistantMeldRequest(body,options.key||process.env.TPS_INTERNAL_KEY);
+   if(meld){
+    if(!meld.forward)return res.status(meld.status).send(meld.body);
+    const response=await(options.fetch||global.fetch)(meld.forward.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(meld.forward.body),signal:AbortSignal.timeout(2200)});
+    res.status(response.status).type('application/json').send(await response.text());
+    return;
+   }
    if(!shouldForwardAssistant(body))return res.status(200).send('');
    // Await delivery so Slack retries transport failures rather than losing a click.
    const response=await (options.fetch||global.fetch)(TARGET,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(2200)});
    res.status(response.status).type('application/json').send(await response.text());
   }catch{if(!res.headersSent)res.status(502).send('Assistant could not be reached.');}
  });
- receiver.router.get('/slack/assistant-events/health',(_req,res)=>res.json({ready:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET)}));
+ receiver.router.get('/slack/assistant-events/health',(_req,res)=>res.json({ready:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET),meldReady:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET)&&!!(options.key||process.env.TPS_INTERNAL_KEY)}));
 }
 module.exports={parseAssistantBody,shouldForwardAssistant,registerAssistantEventsProxy};
 
