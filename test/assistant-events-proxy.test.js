@@ -29,4 +29,12 @@ test('signature is required and filtered events never invoke Latenode',async()=>
  await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers:{}},res);assert.equal(res.code,401);
  await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);assert.equal(res.code,200);assert.equal(calls,0);
 });
+test('signed admin Meld click is acknowledged and relayed directly with the internal key',async()=>{
+ const routes={},secret='fixture-signing',sent=[];let ack=false;
+ registerAssistantEventsProxy({router:{post:(p,h)=>routes[p]=h,get:()=>{}}},{secret,key:'fixture-internal',fetch:async(url,p)=>{assert.equal(ack,false);sent.push({url,p});return{ok:true,status:200,text:async()=>''};}});
+ const payload={type:'block_actions',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},actions:[{action_id:'meld_accept'}]},raw=new URLSearchParams({payload:JSON.stringify(payload)}).toString(),ts=String(Math.floor(Date.now()/1000));
+ const headers={'x-slack-request-timestamp':ts,'x-slack-signature':'v0='+createHmac('sha256',secret).update('v0:'+ts+':'+raw).digest('hex')};
+ const res={status(n){this.code=n;return this;},send(){ack=true;return this;},type(){return this;}};
+ await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);assert.equal(res.code,200);assert.equal(sent[0].url,'https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831');assert.equal(JSON.parse(JSON.parse(sent[0].p.body).payload).key,'fixture-internal');
+});
 
