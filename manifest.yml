@@ -20,7 +20,7 @@ features:
     - command: /jobs
       url: https://tps-job-board.onrender.com/slack/events
       description: Open the job board, or look up one job
-      usage_hint: "[job # | tech name | mine]"
+      usage_hint: "[job # | files job # | tech name | mine]"
 oauth_config:
   scopes:
     bot:
