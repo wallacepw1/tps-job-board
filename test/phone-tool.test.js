@@ -85,38 +85,52 @@ test('missing settings are reported instead of failing', async () => {
   assert.match(text, /ONCALL_CALENDAR_ICS_URL is not set/);
 });
 
-const ADMIN = 'U0876C3TEGL', TEAM = 'T086X85G14N', HOOK = 'https://hooks.slack.com/commands/T/1/x';
-test('only /admin phone and tps_phone_ buttons are taken; non-admins are refused', async () => {
+const ADMIN = 'U0876C3TEGL', TEAM = 'T086X85G14N';
+const EMPTY = async () => ({ at: new Date(), phone: { ready: false }, calendar: { connected: false }, errors: [] });
+function slackFake() {
+  const calls = [];
+  return { calls, fetch: async (url, init) => { const body = JSON.parse(init.body); calls.push({ method: url.split('/').pop(), body, auth: init.headers.Authorization }); return { json: async () => ({ ok: true, view: { id: 'V1' } }) }; } };
+}
+
+test('only /phone, /admin phone and tps_phone_ buttons are taken; non-admins are refused', async () => {
   assert.equal(phoneRequest({ command: '/admin', text: 'estimate' }), null);
   assert.equal(phoneRequest({ command: '/tps', text: 'phone' }), null);
   assert.equal(phoneRequest({ type: 'block_actions', actions: [{ action_id: 'qb:menu' }] }), null);
-  const refused = handlePhone({ command: '/admin', text: 'phone', user_id: 'U0C2TELAYKE', team_id: TEAM, response_url: HOOK });
+  const refused = handlePhone({ command: '/phone', user_id: 'U0C2TELAYKE', team_id: TEAM, trigger_id: 't' }, { token: 'x' });
   assert.match(refused.json.text, /limited to TPS admins/);
   assert.equal(refused.follow, undefined);
+  const noToken = handlePhone({ command: '/phone', user_id: ADMIN, team_id: TEAM, trigger_id: 't' }, { token: '' });
+  assert.match(noToken.json.text, /TPS_ASSISTANT_BOT_TOKEN/);
 });
 
-test('admin command answers at once, then posts the status to the response URL', async () => {
+test('Phone button opens a loading pop-up at once, then fills it; Refresh updates the same pop-up', async () => {
   resetPhoneCache();
-  const posts = [];
-  const out = handlePhone({ command: '/admin', text: 'phone', user_id: ADMIN, team_id: TEAM, response_url: HOOK }, { fetch: async (url, init) => { posts.push({ url, body: JSON.parse(init.body) }); return { ok: true }; }, load: async () => ({ at: new Date(), phone: { ready: false }, calendar: { connected: false }, errors: [] }) });
-  assert.match(out.json.text, /Checking Phone.com/);
+  const slack = slackFake();
+  const out = handlePhone({ type: 'block_actions', user: { id: ADMIN }, team: { id: TEAM }, trigger_id: 'trig', actions: [{ action_id: 'tps_phone_open' }] }, { fetch: slack.fetch, load: EMPTY, token: 'xoxb-assistant' });
+  assert.equal(out.status, 200);
   await out.follow;
-  assert.equal(posts[0].url, HOOK);
-  assert.equal(posts[0].body.replace_original, true);
-  assert.match(JSON.stringify(posts[0].body.blocks), /tps_phone_refresh/);
+  assert.deepEqual(slack.calls.map(c => c.method), ['views.open', 'views.update']);
+  assert.equal(slack.calls[0].body.trigger_id, 'trig');
+  assert.equal(slack.calls[0].auth, 'Bearer xoxb-assistant');
+  assert.equal(slack.calls[1].body.view_id, 'V1');
+  assert.match(JSON.stringify(slack.calls[1].body.view.blocks), /tps_phone_refresh/);
+  const again = handlePhone({ type: 'block_actions', user: { id: ADMIN }, team: { id: TEAM }, view: { type: 'modal', id: 'V9' }, actions: [{ action_id: 'tps_phone_refresh' }] }, { fetch: slack.fetch, load: EMPTY, token: 'xoxb-assistant' });
+  await again.follow;
+  assert.equal(slack.calls[2].method, 'views.update');
+  assert.equal(slack.calls[2].body.view_id, 'V9');
 });
 
-test('signed /admin phone through the Assistant endpoint never reaches Latenode', async () => {
+test('signed /phone through the Assistant endpoint opens the pop-up and never reaches Latenode', async () => {
   resetPhoneCache();
   const routes = {}, secret = 'fixture-signing', sent = [];
-  registerAssistantEventsProxy({ router: { post: (p, h) => routes[p] = h, get: () => {} } }, { secret, fetch: async (url, init) => { sent.push(url); return { ok: true, status: 200, text: async () => '' }; }, loadPhone: async () => ({ at: new Date(), phone: { ready: false }, calendar: { connected: false }, errors: [] }) });
-  const raw = new URLSearchParams({ command: '/admin', text: 'phone', user_id: ADMIN, team_id: TEAM, response_url: HOOK }).toString(), ts = String(Math.floor(Date.now() / 1000));
+  process.env.TPS_ASSISTANT_BOT_TOKEN = 'xoxb-assistant';
+  registerAssistantEventsProxy({ router: { post: (p, h) => routes[p] = h, get: () => {} } }, { secret, fetch: async (url, init) => { sent.push(url); return { ok: true, status: 200, json: async () => ({ ok: true, view: { id: 'V1' } }), text: async () => '' }; }, loadPhone: EMPTY });
+  const raw = new URLSearchParams({ command: '/phone', text: '', user_id: ADMIN, team_id: TEAM, trigger_id: 'trig' }).toString(), ts = String(Math.floor(Date.now() / 1000));
   const headers = { 'x-slack-request-timestamp': ts, 'x-slack-signature': 'v0=' + createHmac('sha256', secret).update('v0:' + ts + ':' + raw).digest('hex') };
-  let json;
-  const res = { status(n) { this.code = n; return this; }, json(b) { json = b; return this; }, send() { return this; }, type() { return this; } };
+  const res = { status(n) { this.code = n; return this; }, json() { return this; }, send() { return this; }, type() { return this; } };
   await routes['/slack/assistant-events']({ rawBody: Buffer.from(raw), headers }, res);
+  delete process.env.TPS_ASSISTANT_BOT_TOKEN;
   assert.equal(res.code, 200);
-  assert.match(json.text, /Checking Phone.com/);
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(sent, [HOOK]);
+  assert.deepEqual(sent, ['https://slack.com/api/views.open', 'https://slack.com/api/views.update']);
 });

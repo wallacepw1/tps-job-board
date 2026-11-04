@@ -1,17 +1,22 @@
 'use strict';
-// "/admin phone" and the Phone buttons from TPS Assistant, answered here on Render (no Latenode run).
+// Phone settings pop-up for TPS admins, answered here on Render (no Latenode run).
+// Opened by the "📞 Phone settings" button (action tps_phone_open) or the /phone command of TPS Assistant.
 // Called only after the Assistant endpoint has verified Slack's signature.
 const { ADMINS } = require('./assignment-policy');
 const { loadSnapshot, statusBlocks } = require('./phone-status');
+const { slackApi } = require('./job-files');
 
 const TEAM = 'T086X85G14N';
-const ACTION = /^tps_phone_/;
+const OPEN = 'tps_phone_open', REFRESH = 'tps_phone_refresh', CALLBACK = 'tps_phone_settings';
 let cached = null; // { at, snap }
 
 function phoneRequest(body) {
-  if (body?.command === '/admin' && /^\s*phone\b/i.test(body.text || '')) return { user: body.user_id, team: body.team_id, responseUrl: body.response_url, kind: 'command' };
+  const base = { user: body?.user_id || body?.user?.id, team: body?.team_id || body?.team?.id, trigger: body?.trigger_id, responseUrl: body?.response_url };
+  if (body?.command === '/phone' || (body?.command === '/admin' && /^\s*phone\b/i.test(body.text || ''))) return { ...base, kind: 'open' };
   const action = body?.actions?.[0]?.action_id || '';
-  if (body?.type === 'block_actions' && ACTION.test(action)) return { user: body.user?.id, team: body.team?.id || body.team_id, responseUrl: body.response_url, kind: action };
+  if (body?.type === 'block_actions' && action === OPEN) return { ...base, kind: 'open' };
+  if (body?.type === 'block_actions' && action === REFRESH) return { ...base, kind: 'refresh', viewId: body.view?.type === 'modal' ? body.view.id : null };
+  if (body?.type === 'block_actions' && /^tps_phone_/.test(action)) return { ...base, kind: 'ignore' };
   return null;
 }
 
@@ -23,27 +28,35 @@ async function snapshot({ fresh = false, now = Date.now(), load = loadSnapshot }
   return snap;
 }
 
+const modal = blocks => ({ type: 'modal', callback_id: CALLBACK, title: { type: 'plain_text', text: 'Phone settings' }, close: { type: 'plain_text', text: 'Close' }, blocks });
+const loading = () => modal([{ type: 'section', text: { type: 'mrkdwn', text: '📞 Checking Phone.com and the On call calendar…' } }]);
+async function contentBlocks(fresh, load) {
+  try { return statusBlocks(await snapshot({ fresh, load })); }
+  catch (e) { console.error('phone status failed', e.message); return [{ type: 'section', text: { type: 'mrkdwn', text: `⚠️ Couldn’t read the phone settings (${e.message}).` } }]; }
+}
+
 // Returns null when the request is not for the phone tool; otherwise the immediate answer for Slack
-// and a follow-up that posts the status to the response URL.
-function handlePhone(body, { fetch: fetcher = global.fetch, load } = {}) {
+// and a follow-up promise that opens or fills the pop-up.
+function handlePhone(body, { fetch: fetcher = global.fetch, load, token = process.env.TPS_ASSISTANT_BOT_TOKEN } = {}) {
   const req = phoneRequest(body);
   if (!req) return null;
-  if (req.team !== TEAM || !ADMINS.includes(req.user)) return { status: 200, json: { response_type: 'ephemeral', text: '🔒 Phone settings are limited to TPS admins.' } };
-  if (!/^https:\/\/hooks\.slack\.com\//.test(req.responseUrl || '')) return { status: 200, json: { response_type: 'ephemeral', text: 'Slack did not send a reply address. Try /admin phone again.' } };
+  if (req.kind === 'ignore') return { status: 200, body: '' };
+  const isCommand = !!body.command;
+  const say = text => isCommand ? { status: 200, json: { response_type: 'ephemeral', text } } : { status: 200, body: '' };
+  if (req.team !== TEAM || !ADMINS.includes(req.user)) return say('🔒 Phone settings are limited to TPS admins.');
+  if (!token) return say('📞 Phone settings need one more Render setting (TPS_ASSISTANT_BOT_TOKEN) before the pop-up can open.');
   const follow = (async () => {
-    let message;
-    try {
-      const snap = await snapshot({ fresh: req.kind === 'tps_phone_refresh', load });
-      message = { text: 'Phone settings', blocks: statusBlocks(snap) };
-    } catch (e) {
-      console.error('phone status failed', e.message);
-      message = { text: `⚠️ Couldn’t read the phone settings (${e.message}).` };
+    if (req.kind === 'refresh' && req.viewId) {
+      await slackApi('views.update', { view_id: req.viewId, view: modal(await contentBlocks(true, load)) }, token, fetcher);
+      return;
     }
-    await fetcher(req.responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response_type: 'ephemeral', replace_original: true, ...message }), signal: AbortSignal.timeout(10000) });
-  })().catch(e => console.error('phone reply failed', e.message));
-  if (req.kind === 'command') return { status: 200, json: { response_type: 'ephemeral', text: '📞 Checking Phone.com and the On call calendar…' }, follow };
+    if (!req.trigger) return;
+    // Slack's trigger expires after 3 seconds, so open a loading pop-up first, then fill it.
+    const opened = await slackApi('views.open', { trigger_id: req.trigger, view: loading() }, token, fetcher);
+    await slackApi('views.update', { view_id: opened.view.id, view: modal(await contentBlocks(false, load)) }, token, fetcher);
+  })().catch(e => console.error('phone pop-up failed', e.message));
   return { status: 200, body: '', follow };
 }
 
 function resetPhoneCache() { cached = null; }
-module.exports = { handlePhone, phoneRequest, resetPhoneCache };
+module.exports = { handlePhone, phoneRequest, resetPhoneCache, OPEN, REFRESH };
