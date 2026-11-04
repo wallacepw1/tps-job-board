@@ -66,3 +66,16 @@ test('openDescModal opens on the trigger, then fills from Drive and the Incoming
  assert.equal(view.blocks[1].element.initial_value,'AI draft');
  assert.equal(view.blocks.filter(b=>b.type==='image').length,3,'PDF page + 2 photos');
 });
+
+test('a video in both Drive and Slack shows once, with its Drive file link',async()=>{
+ jf._listCache.clear();
+ const fetch=async(url,init)=>{
+  if(url.startsWith('https://slack.com/api/'))return{ok:true,json:async()=>({ok:true,messages:[{ts:'1',files:[{id:'F9',name:'WhatsApp_132273_1.mp4',mimetype:'video/quicktime',size:3549804,permalink:'https://tpsplumbing.slack.com/files/U/F9/x.mp4'},{id:'F8',name:'other.mp4',mimetype:'video/mp4',size:42}]}]})};
+  return{ok:true,json:async()=>({files:[{id:'vid1aaaaaaaaaa',name:'IMG_0569.MOV',mimeType:'video/mp4',size:'3549804',webViewLink:'https://drive.google.com/file/d/vid1aaaaaaaaaa/view?usp=drivesdk'}]})};
+ };
+ const {files}=await d.gatherFiles({folderId:FOLDER,incoming:{channel:'C0INCOMING',ts:'1793740000.123456'},jobNumber:'132273'},{...o,fetch});
+ assert.deepEqual(files.map(f=>f.id),['vid1aaaaaaaaaa','F8']);
+ const v=d.descView({jobNumber:'132273',notes:'',text:'',files,meta:{}},o);
+ const plays=v.blocks.filter(b=>b.accessory?.text?.text==='Play').map(b=>b.accessory.url);
+ assert.equal(plays[0],'https://drive.google.com/file/d/vid1aaaaaaaaaa/view?usp=drivesdk');
+});
