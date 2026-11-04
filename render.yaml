@@ -33,5 +33,7 @@ services:
         sync: false
       - key: ONCALL_CALENDAR_ICS_URL
         sync: false
+      - key: TPS_ASSISTANT_BOT_TOKEN
+        sync: false
       - key: PUBLIC_URL
         value: https://tps-job-board.onrender.com
