@@ -29,5 +29,9 @@ services:
         sync: false
       - key: GOOGLE_API_KEY
         sync: false
+      - key: PHONECOM_API_TOKEN
+        sync: false
+      - key: ONCALL_CALENDAR_ICS_URL
+        sync: false
       - key: PUBLIC_URL
         value: https://tps-job-board.onrender.com
