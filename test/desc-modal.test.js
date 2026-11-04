@@ -30,7 +30,8 @@ test('pop-up: notes, description box, then PDFs and photos; Slack photos by file
  assert.ok(v.blocks[0].text.text.includes('leak b')&&!v.blocks[0].text.text.includes('<b>'));
  const input=v.blocks[1];assert.equal(input.block_id,'notes_input_block');assert.equal(input.element.initial_value,'AI draft');assert.match(input.hint.text,/pricing/);
  const types=v.blocks.slice(2).map(b=>b.type);
- assert.deepEqual(types,['divider','context','section','image','image','section']);
+ assert.deepEqual(types,['divider','section','section','image','image','section']);
+ assert.equal(v.blocks[3].accessory.text.text,'📷 View full screen');assert.ok(v.blocks[3].accessory.url.startsWith(`https://board.example/job-files/${FOLDER}?`));
  assert.ok(v.blocks[5].image_url.startsWith(`https://board.example/job-files/${FOLDER}/thumb/pdf1aaaaaaaaaa?`),'PDF first page');
  assert.deepEqual(v.blocks[6].slack_file,{id:'F1'});
  assert.equal(v.blocks[7].accessory.text.text,'Play');

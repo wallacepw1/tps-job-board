@@ -85,3 +85,17 @@ test('openFilesModal opens a loading view on the trigger, then fills it from Dri
  assert.equal(r,'opened');assert.deepEqual(calls.map(c=>c.m),['views.open','views.update']);
  assert.equal(calls[0].b.trigger_id,'T1');assert.equal(calls[1].b.view_id,'V1');assert.ok(calls[1].b.view.blocks.some(b=>b.type==='image'));
 });
+test('gallery opens photos and videos in a full-screen swipe viewer',()=>{
+ const html=jf.galleryHtml({jobNumber:'132275',folderId:FOLDER,query:'job=132275&exp=1&sig=a',files:[
+  {id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'},{id:'vid1aaaaaaaaaa',name:'b.mp4',mimeType:'video/mp4'},{id:'pdf1aaaaaaaaaa',name:'c.pdf',mimeType:'application/pdf'}]});
+ assert.ok(html.includes('data-lb="photo" data-id="img1aaaaaaaaaa"'));
+ assert.ok(html.includes('data-lb="video" data-id="vid1aaaaaaaaaa"'));
+ assert.ok(!html.includes('data-lb="pdf"'),'PDFs keep the PDF viewer');
+ assert.ok(html.includes('&amp;w=1600'),'full-size photo');
+ assert.ok(html.includes('id="lb"')&&html.includes('/preview'));
+});
+test('Files pop-up has a View full screen link to the signed gallery',()=>{
+ const v=jf.filesModal({jobNumber:'132275',folderId:FOLDER,files:[]},o);
+ const b=v.blocks[0].accessory;assert.equal(b.text.text,'📷 View full screen');
+ const q=new URL(b.url).searchParams;assert.ok(jf.verify(FOLDER,'132275',q.get('exp'),q.get('sig'),o,Date.now()+23*3600e3),'valid for a day');
+});

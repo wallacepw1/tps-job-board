@@ -74,7 +74,7 @@ function filesModal({jobNumber,folderId,files},o={},now=Date.now()){
  const counts=sorted.reduce((c,f)=>(c[kindOf(f)]=(c[kindOf(f)]||0)+1,c),{});
  const label=(n,w)=>n?`${n} ${w}${n===1?'':'s'}`:'';
  const summary=[label(counts.pdf,'PDF'),label(counts.photo,'photo'),label(counts.video,'video')].filter(Boolean).join(' · ')||'No files yet';
- const blocks=[{type:'section',text:{type:'mrkdwn',text:`*Job ${jobNumber}* · ${summary}`},accessory:{type:'button',action_id:'tps_job_files_drive',text:plain('Open in Drive'),url:folderUrl(folderId)}}];
+ const blocks=[{type:'section',text:{type:'mrkdwn',text:`*Job ${jobNumber}* · ${summary}`},accessory:{type:'button',action_id:'tps_job_files_gallery',text:plain('📷 View full screen'),url:galleryUrl(folderId,jobNumber,o,now,MODAL_LINK_TTL)}},{type:'context',elements:[{type:'mrkdwn',text:`Tap *View full screen* to swipe through photos and play videos. <${folderUrl(folderId)}|Open in Drive>`}]}];
  for(const f of sorted.slice(0,MODAL_MAX)){
   const k=kindOf(f);
   if(k==='photo')blocks.push({type:'image',image_url:thumb(f,1000),alt_text:f.name.slice(0,200),title:plain(f.name)});
@@ -151,6 +151,34 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function kindOf(f){const m=f.mimeType||'';return m.startsWith('image/')?'photo':m.startsWith('video/')?'video':m==='application/pdf'?'pdf':m==='application/vnd.google-apps.folder'?'folder':'file';}
 const viewLink=f=>f.webViewLink||(kindOf(f)==='folder'?folderUrl(f.id):`https://drive.google.com/file/d/${f.id}/view`);
 
+// Full-screen viewer, like a phone photo album: tap a photo or video tile, swipe left/right, back or X closes.
+// Photos load at 1600 px; a video loads Drive's player only when its slide is showing.
+const LIGHTBOX=`<div id="lb" hidden><div id="lbtrack"></div><div id="lbbar"><span id="lbcount"></span><button id="lbx" aria-label="Close">✕</button></div></div>
+<style>#lb{position:fixed;inset:0;background:#000;z-index:10}#lb[hidden]{display:none}
+#lbtrack{display:flex;height:100%;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}#lbtrack::-webkit-scrollbar{display:none}
+.lbs{flex:0 0 100%;height:100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;overflow:auto}
+.lbs img{max-width:100%;max-height:100%;object-fit:contain}.lbs iframe{width:100%;height:100%;border:0}
+.lbs .poster{position:relative;color:#fff;font-size:15px;text-align:center}.lbs .poster img{max-height:70vh;opacity:.6}
+#lbbar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:linear-gradient(rgba(0,0,0,.6),transparent);color:#fff;font-size:14px;pointer-events:none}
+#lbx{pointer-events:auto;background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:50%;width:40px;height:40px;font-size:20px}</style>
+<script>(()=>{
+const tiles=[...document.querySelectorAll('[data-lb]')];if(!tiles.length)return;
+const lb=document.getElementById('lb'),track=document.getElementById('lbtrack'),count=document.getElementById('lbcount');let cur=-1,built=false;
+function build(){if(built)return;built=true;tiles.forEach(t=>{const d=document.createElement('div');d.className='lbs';
+ if(t.dataset.lb==='photo'){const i=document.createElement('img');i.loading='lazy';i.alt=t.dataset.name;i.src=t.dataset.full;d.appendChild(i);}
+ else{const p=document.createElement('div');p.className='poster';const i=document.createElement('img');i.alt='';i.src=t.dataset.full;p.appendChild(i);p.appendChild(document.createElement('div')).textContent='▶ Loading video…';d.appendChild(p);}
+ track.appendChild(d);});}
+function show(n){cur=n;count.textContent=(n+1)+' / '+tiles.length+'  ·  '+tiles[n].dataset.name;
+ [...track.children].forEach((s,i)=>{const t=tiles[i];if(t.dataset.lb!=='video')return;const has=s.querySelector('iframe');
+  if(i===n&&!has){s.innerHTML='';const f=document.createElement('iframe');f.src='https://drive.google.com/file/d/'+encodeURIComponent(t.dataset.id)+'/preview';f.allow='autoplay; fullscreen; encrypted-media';f.allowFullscreen=true;f.referrerPolicy='no-referrer';s.appendChild(f);}
+  else if(i!==n&&has){s.innerHTML='';const p=document.createElement('div');p.className='poster';p.textContent='▶ Video';s.appendChild(p);}});}
+function open(n){build();lb.hidden=false;document.body.style.overflow='hidden';track.scrollLeft=n*track.clientWidth;show(n);history.pushState({lb:1},'');}
+function close(){if(lb.hidden)return;lb.hidden=true;document.body.style.overflow='';[...track.querySelectorAll('iframe')].forEach(f=>f.remove());cur=-1;}
+tiles.forEach((t,i)=>t.addEventListener('click',e=>{e.preventDefault();open(i);}));
+let timer;track.addEventListener('scroll',()=>{clearTimeout(timer);timer=setTimeout(()=>{const n=Math.round(track.scrollLeft/track.clientWidth);if(n!==cur&&n>=0&&n<tiles.length)show(n);},120);});
+document.getElementById('lbx').addEventListener('click',()=>history.back());
+addEventListener('popstate',close);addEventListener('keydown',e=>{if(e.key==='Escape')history.back();});
+})();</script>`;
 function galleryHtml({jobNumber,folderId,files,query}){
  const order={pdf:0,photo:1,video:2,file:3,folder:4};
  const sorted=[...files].sort((a,b)=>order[kindOf(a)]-order[kindOf(b)]||String(a.createdTime).localeCompare(String(b.createdTime)));
@@ -162,12 +190,14 @@ function galleryHtml({jobNumber,folderId,files,query}){
   const img=(f.thumbnailLink||k==='photo'||k==='video'||k==='pdf')?`<img loading="lazy" src="${esc(thumb(f))}" alt="" onerror="this.remove()">`:'';
   const inPanel=k==='photo'||k==='pdf'||k==='video'&&new URLSearchParams(query).get('video')==='1';
   const href=inPanel?`/job-files/${folderId}/view/${encodeURIComponent(f.id)}?${query}`:viewLink(f);
-  return`<a class="tile ${k}" href="${esc(href)}"${inPanel?'':' target="_blank" rel="noopener"'}><div class="pic">${img}${badge?`<span class="badge">${badge}</span>`:''}</div><div class="name">${esc(f.name)}</div></a>`;};
+  const lb=k==='photo'||k==='video'?` data-lb="${k}" data-id="${esc(f.id)}" data-full="${esc(thumb(f)+'&w=1600')}" data-name="${esc(f.name)}"`:'';
+  return`<a class="tile ${k}" href="${esc(href)}"${inPanel?'':' target="_blank" rel="noopener"'}${lb}><div class="pic">${img}${badge?`<span class="badge">${badge}</span>`:''}</div><div class="name">${esc(f.name)}</div></a>`;};
  return`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Job files ${esc(jobNumber)}</title>
 <style>${CSS}
 </style></head><body>
 <header><div><h1>Job ${esc(jobNumber)}</h1><div class="muted">${esc(summary)}</div></div><a href="${esc(folderUrl(folderId))}" target="_blank" rel="noopener">Open in Drive</a></header>
 ${sorted.length?`<div class="grid">${sorted.map(tile).join('')}</div>`:'<div class="empty">Nothing in this job folder yet.</div>'}
+${LIGHTBOX}
 </body></html>`;
 }
 
