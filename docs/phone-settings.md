@@ -29,3 +29,13 @@ If the Phone.com or calendar value is missing, the pop-up still opens and says w
 - Results are cached for 60 seconds. The Refresh button rereads after 15 seconds. This keeps the tool well under Phone.com's limit of 30 calls per endpoint every 30 seconds.
 - Shift times are read as Pacific office time. The calendar's events are labeled America/Vancouver/Tijuana, and British Columbia stays on daylight time from November 2026, so its clock no longer matches Oregon's.
 - `src/phonecom.js` is the shared Phone.com connection that the texting tools will reuse once the SMS campaign is approved.
+
+## On-call sync (`src/oncall-sync.js`)
+
+Every 5 minutes Render compares the On call calendar with the Phone.com **On Call Plumber** menu's no-answer option. The mode is set by `PHONECOM_SYNC_MODE`:
+
+- `report` (default): if the two disagree on two checks in a row, TPS Bot posts once in the channel the old scenario uses (C086PAU2BM5) to say what it *would* switch. Phone.com is not changed.
+- `live`: switches the menu to the person on the calendar, reads it back to confirm, and posts the change. **Turn off the Latenode Calendar-Oncall Routing scenario at the same moment. Never run both.**
+- `off`: does nothing.
+
+When the calendar is unclear (nobody on call, two people at once, or a title with no TPS plumber name in it), Phone.com is left alone and the sync posts why, once. `/phone/health` shows the mode and the last check.
