@@ -152,12 +152,12 @@ function kindOf(f){const m=f.mimeType||'';return m.startsWith('image/')?'photo':
 const viewLink=f=>f.webViewLink||(kindOf(f)==='folder'?folderUrl(f.id):`https://drive.google.com/file/d/${f.id}/view`);
 
 // Full-screen viewer, like a phone photo album: tap a photo or video tile, swipe left/right, back or X closes.
-// Photos load at 1600 px; a video loads Drive's player only when its slide is showing.
+// Photos load at 1600 px; a video streams from /video only when its slide is showing.
 const LIGHTBOX=`<div id="lb" hidden><div id="lbtrack"></div><div id="lbbar"><span id="lbcount"></span><button id="lbx" aria-label="Close">✕</button></div></div>
 <style>#lb{position:fixed;inset:0;background:#000;z-index:10}#lb[hidden]{display:none}
 #lbtrack{display:flex;height:100%;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}#lbtrack::-webkit-scrollbar{display:none}
 .lbs{flex:0 0 100%;height:100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;overflow:auto}
-.lbs img{max-width:100%;max-height:100%;object-fit:contain}.lbs iframe{width:100%;height:100%;border:0}
+.lbs img,.lbs video{max-width:100%;max-height:100%;object-fit:contain}
 .lbs .poster{position:relative;color:#fff;font-size:15px;text-align:center}.lbs .poster img{max-height:70vh;opacity:.6}
 #lbbar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:linear-gradient(rgba(0,0,0,.6),transparent);color:#fff;font-size:14px;pointer-events:none}
 #lbx{pointer-events:auto;background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:50%;width:40px;height:40px;font-size:20px}</style>
@@ -169,11 +169,11 @@ function build(){if(built)return;built=true;tiles.forEach(t=>{const d=document.c
  else{const p=document.createElement('div');p.className='poster';const i=document.createElement('img');i.alt='';i.src=t.dataset.full;p.appendChild(i);p.appendChild(document.createElement('div')).textContent='▶ Loading video…';d.appendChild(p);}
  track.appendChild(d);});}
 function show(n){cur=n;count.textContent=(n+1)+' / '+tiles.length+'  ·  '+tiles[n].dataset.name;
- [...track.children].forEach((s,i)=>{const t=tiles[i];if(t.dataset.lb!=='video')return;const has=s.querySelector('iframe');
-  if(i===n&&!has){s.innerHTML='';const f=document.createElement('iframe');f.src='https://drive.google.com/file/d/'+encodeURIComponent(t.dataset.id)+'/preview';f.allow='autoplay; fullscreen; encrypted-media';f.allowFullscreen=true;f.referrerPolicy='no-referrer';s.appendChild(f);}
+ [...track.children].forEach((s,i)=>{const t=tiles[i];if(t.dataset.lb!=='video')return;const has=s.querySelector('video');
+  if(i===n&&!has){s.innerHTML='';const f=document.createElement('video');f.controls=true;f.playsInline=true;f.preload='metadata';f.poster=t.dataset.full;f.src=t.dataset.video;s.appendChild(f);}
   else if(i!==n&&has){s.innerHTML='';const p=document.createElement('div');p.className='poster';p.textContent='▶ Video';s.appendChild(p);}});}
 function open(n){build();lb.hidden=false;document.body.style.overflow='hidden';track.scrollLeft=n*track.clientWidth;show(n);history.pushState({lb:1},'');}
-function close(){if(lb.hidden)return;lb.hidden=true;document.body.style.overflow='';[...track.querySelectorAll('iframe')].forEach(f=>f.remove());cur=-1;}
+function close(){if(lb.hidden)return;lb.hidden=true;document.body.style.overflow='';[...track.querySelectorAll('video')].forEach(f=>{f.pause();f.remove();});cur=-1;}
 tiles.forEach((t,i)=>t.addEventListener('click',e=>{e.preventDefault();open(i);}));
 let timer;track.addEventListener('scroll',()=>{clearTimeout(timer);timer=setTimeout(()=>{const n=Math.round(track.scrollLeft/track.clientWidth);if(n!==cur&&n>=0&&n<tiles.length)show(n);},120);});
 document.getElementById('lbx').addEventListener('click',()=>history.back());
@@ -188,9 +188,9 @@ function galleryHtml({jobNumber,folderId,files,query}){
  const thumb=f=>`/job-files/${folderId}/thumb/${encodeURIComponent(f.id)}?${query}`;
  const tile=f=>{const k=kindOf(f),badge={video:'▶ Video',pdf:'PDF',file:'File',folder:'Folder'}[k]||'';
   const img=(f.thumbnailLink||k==='photo'||k==='video'||k==='pdf')?`<img loading="lazy" src="${esc(thumb(f))}" alt="" onerror="this.remove()">`:'';
-  const inPanel=k==='photo'||k==='pdf'||k==='video'&&new URLSearchParams(query).get('video')==='1';
+  const inPanel=k==='photo'||k==='pdf'||k==='video';
   const href=inPanel?`/job-files/${folderId}/view/${encodeURIComponent(f.id)}?${query}`:viewLink(f);
-  const lb=k==='photo'||k==='video'?` data-lb="${k}" data-id="${esc(f.id)}" data-full="${esc(thumb(f)+'&w=1600')}" data-name="${esc(f.name)}"`:'';
+  const lb=k==='photo'||k==='video'?` data-lb="${k}" data-id="${esc(f.id)}" data-full="${esc(thumb(f)+'&w=1600')}" data-name="${esc(f.name)}" data-video="${esc(`/job-files/${folderId}/video/${encodeURIComponent(f.id)}?${query}`)}"`:'';
   return`<a class="tile ${k}" href="${esc(href)}"${inPanel?'':' target="_blank" rel="noopener"'}${lb}><div class="pic">${img}${badge?`<span class="badge">${badge}</span>`:''}</div><div class="name">${esc(f.name)}</div></a>`;};
  return`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Job files ${esc(jobNumber)}</title>
 <style>${CSS}
@@ -208,7 +208,7 @@ const MAX_RAW=40*1024*1024;
 function viewerHtml({jobNumber,folderId,file,query}){
  const back=`/job-files/${folderId}?${query}`,raw=`/job-files/${folderId}/raw/${encodeURIComponent(file.id)}?${query}`,k=kindOf(file);
  const body=k==='video'
-  ?`<iframe title="${esc(file.name)}" src="https://drive.google.com/file/d/${encodeURIComponent(file.id)}/preview" allow="autoplay; fullscreen; encrypted-media" allowfullscreen referrerpolicy="no-referrer" style="width:100%;aspect-ratio:16/9;min-height:240px;border:0"></iframe><p class="muted">If the player cannot load, use Open in Drive above.</p>`
+  ?`<video controls playsinline preload="metadata" src="/job-files/${folderId}/video/${encodeURIComponent(file.id)}?${esc(query)}" style="width:100%;max-height:80vh;background:#000"></video><p class="muted">If the video does not play, use Open in Drive above.</p>`
   :k==='pdf'
   ?`<div id="pages" class="muted">Loading PDF…</div>
 <script src="${PDFJS}/pdf.min.js"></script>
@@ -255,7 +255,7 @@ function registerJobFilesGallery(receiver,o={}){
  receiver.router.get('/job-files/:folder/view/:file',async(req,res)=>{
   frame(res);
   try{const x=await fileOf(req,res);if(!x)return;
-   if(!['photo','pdf'].includes(kindOf(x.f))&&!(kindOf(x.f)==='video'&&req.query.video==='1'))return res.redirect(viewLink(x.f));
+   if(!['photo','pdf'].includes(kindOf(x.f))&&kindOf(x.f)!=='video')return res.redirect(viewLink(x.f));
    res.type('html').send(viewerHtml({jobNumber:x.job,folderId:x.folder,file:x.f,query:x.query}));
   }catch{if(!res.headersSent)res.status(502).type('html').send(errorHtml("Couldn't read the Drive folder right now."));}
  });
@@ -270,6 +270,22 @@ function registerJobFilesGallery(receiver,o={}){
    res.set('Content-Type',x.f.mimeType).set('Cache-Control','private, max-age=600');
    res.send(Buffer.from(await r.arrayBuffer()));
   }catch{if(!res.headersSent)res.status(502).end();}
+ });
+ // Video bytes streamed from Drive with Range support, so a plain <video> player works inside Slack's frame and
+ // in Slack's phone browser (Drive's own /preview player does not load there). Nothing is buffered on Render.
+ receiver.router.get('/job-files/:folder/video/:file',async(req,res)=>{
+  try{const x=await fileOf(req,res);if(!x)return;
+   if(kindOf(x.f)!=='video')return res.status(415).end();
+   const range=/^bytes=\d*-\d*$/.test(req.headers.range||'')?req.headers.range:undefined;
+   const ac=new AbortController();req.on('close',()=>ac.abort());
+   const r=await(o.fetch||global.fetch)(`https://www.googleapis.com/drive/v3/files/${x.f.id}?alt=media&supportsAllDrives=true&key=${encodeURIComponent(env(o,'GOOGLE_API_KEY'))}`,{headers:range?{Range:range}:{},signal:ac.signal});
+   if(!r.ok&&r.status!==206)return res.status(r.status===416?416:502).end();
+   const type=/quicktime/.test(x.f.mimeType)?'video/mp4':x.f.mimeType;
+   res.status(r.status).set('Content-Type',type).set('Accept-Ranges','bytes').set('Cache-Control','private, max-age=600');
+   for(const h of['content-length','content-range'])if(r.headers.get(h))res.set(h,r.headers.get(h));
+   if(!r.body)return res.end();
+   const {Readable}=require('node:stream');Readable.fromWeb(r.body).on('error',()=>res.destroy()).pipe(res);
+  }catch{if(!res.headersSent)res.status(502).end();else res.destroy();}
  });
  receiver.router.get('/job-files/:folder/thumb/:file',async(req,res)=>{
   const {folder,file}=req.params,{job,exp,sig}=req.query;
