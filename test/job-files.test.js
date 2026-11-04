@@ -41,3 +41,25 @@ test('gallery route sends frame-ancestors for Slack and refuses unsigned links',
  await routes['/job-files/:folder']({params:{folder:FOLDER},query:Object.fromEntries(q)},res);
  assert.equal(res.code,undefined);assert.ok(res.body.includes('a.jpg'));
 });
+test('photos and PDFs open inside the panel; videos still open in Drive',()=>{
+ const html=jf.galleryHtml({jobNumber:'132198',folderId:FOLDER,query:'job=132198&exp=1&sig=a',files:[
+  {id:'pdf1aaaaaaaaaa',name:'wo.pdf',mimeType:'application/pdf'},{id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'},{id:'vid1aaaaaaaaaa',name:'v.mp4',mimeType:'video/mp4'}]});
+ assert.ok(html.includes(`/job-files/${FOLDER}/view/pdf1aaaaaaaaaa?job=132198&amp;exp=1&amp;sig=a`));
+ assert.ok(html.includes(`/job-files/${FOLDER}/view/img1aaaaaaaaaa?`));
+ assert.ok(!html.includes('/view/vid1'));
+ const pdf=jf.viewerHtml({jobNumber:'132198',folderId:FOLDER,query:'job=132198&exp=1&sig=a',file:{id:'pdf1aaaaaaaaaa',name:'wo.pdf',mimeType:'application/pdf'}});
+ assert.ok(pdf.includes('pdf.min.js')&&pdf.includes(`/job-files/${FOLDER}/raw/pdf1aaaaaaaaaa?job=132198&exp=1&sig=a`));
+ assert.ok(pdf.includes('Open in Drive'));
+});
+test('raw proxy streams a signed PDF from Drive with CORS for the null-origin embed',async()=>{
+ const routes={},seen=[];
+ const fetch=async(url)=>{seen.push(url);if(url.includes('alt=media'))return{ok:true,arrayBuffer:async()=>new TextEncoder().encode('%PDF-1.4').buffer};return{ok:true,json:async()=>({files:[{id:'pdf2aaaaaaaaaa',name:'wo.pdf',mimeType:'application/pdf',size:'8'}]})};};
+ jf._listCache.clear();jf.registerJobFilesGallery({router:{get:(p,h)=>routes[p]=h}},{...o,fetch});
+ const q=Object.fromEntries(new URL(jf.galleryUrl(FOLDER,'132198',o)).searchParams);
+ const res={h:{},set(k,v){this.h[k]=v;return this;},status(n){this.code=n;return this;},send(b){this.body=b;this.headersSent=true;return this;},end(){this.headersSent=true;return this;}};
+ await routes['/job-files/:folder/raw/:file']({params:{folder:FOLDER,file:'pdf2aaaaaaaaaa'},query:q},res);
+ assert.equal(res.code,undefined);assert.equal(res.h['Access-Control-Allow-Origin'],'*');assert.equal(res.h['Content-Type'],'application/pdf');
+ assert.ok(seen.some(u=>u.includes('/files/pdf2aaaaaaaaaa?alt=media')));
+ const bad={...res,h:{},code:undefined,set:res.set,status:res.status,send:res.send,end:res.end};
+ await routes['/job-files/:folder/raw/:file']({params:{folder:FOLDER,file:'other1aaaaaaaa'},query:q},bad);assert.equal(bad.code,404);
+});
