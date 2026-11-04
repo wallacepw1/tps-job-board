@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { homeView, filterJobs } = require('../src/views');
 const { isIntakePlaceholder, zonedDate, dayKey } = require('../src/jobs');
 
-const now = new Date();
+const now = zonedDate(dayKey(new Date()), '12:00');
 const today = dayKey(now);
 const jobs = [
   { jobNumber: '132174', client: 'Fairgrove Property Management', location: '2446 Brant St, San Diego, CA 92101', issue: 'Drain/Pipe Clog', status: 'scheduled', tech: 'Eduardo', when: zonedDate(today, '09:00'), timed: true, threadTs: '1792690044.863279' },
@@ -16,9 +16,9 @@ const store = { jobs, techs: () => ['Eduardo'], updatedAt: now };
 
 test('tabs split jobs by day and status', () => {
   // Today = only today's jobs: booked times first, then today's calls. Older open calls go to All open.
-  assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' }).map((j) => j.jobNumber), ['132174', '132181']);
-  assert.deepEqual(filterJobs(jobs, { tab: 'open', tech: 'unassigned' }).map((j) => j.jobNumber), ['132181']);
-  assert.deepEqual(filterJobs(jobs, { tab: 'recent', tech: 'all' }).map((j) => j.jobNumber), ['132162']);
+  assert.deepEqual(filterJobs(jobs, { tab: 'today', tech: 'all' },now).map((j) => j.jobNumber), ['132174', '132181']);
+  assert.deepEqual(filterJobs(jobs, { tab: 'open', tech: 'unassigned' },now).map((j) => j.jobNumber), ['132181']);
+  assert.deepEqual(filterJobs(jobs, { tab: 'recent', tech: 'all' },now).map((j) => j.jobNumber), ['132162']);
 });
 
 test('home view stays within Slack block limits', () => {
