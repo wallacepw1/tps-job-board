@@ -20,6 +20,7 @@ const TABS = [
   { id: 'week', label: 'This week' },
   { id: 'open', label: 'All open' },
   { id: 'recent', label: 'Done (7 days)' },
+  { id: 'unclosed', label: 'Completed—not closed' },
   { id: 'history', label: 'Past calls' },
 ];
 
@@ -95,6 +96,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
       case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today) || Boolean(j.needsDate));
       case 'stuck': return stuckCall(j, today);
       case 'recent': return j.status === 'done' && (j.completedAt || j.when || j.postedAt || 0) >= weekAgo;
+      case 'unclosed': return !j.canceled&&!j.closed&&['done','price','closing'].includes(j.workflowStage);
       case 'history': return j.status==='done'||Boolean(day&&day<today);
       default: return true;
     }
@@ -115,6 +117,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
   if (tab === 'stuck') list.sort((a, b) => (a.when || 0) - (b.when || 0));
   if (tab === 'history') list.sort((a,b)=>(b.completedAt||b.when||b.postedAt||0)-(a.completedAt||a.when||a.postedAt||0));
   if (tab === 'recent') list.sort((a, b) => (b.completedAt || b.when || 0) - (a.completedAt || a.when || 0));
+  if(tab==='unclosed'){const rank={done:0,price:1,closing:2};list.sort((a,b)=>rank[a.workflowStage]-rank[b.workflowStage]||(a.completedAt||a.when||a.postedAt||0)-(b.completedAt||b.when||b.postedAt||0));}
   return list;
 }
 
@@ -185,6 +188,8 @@ function boardBlocks(store, filters) {
   let source=scopedJobs(store.jobs,filters.user);
   if(compact&&filters.tab==='mine')source=source.filter(j=>doneOn(j,dayKey(new Date()))||j.status!=='done'&&j.when&&dayKey(j.when)===dayKey(new Date()));
   const jobs = filterJobs(source, filters);
+  const paged=filters.tab==='unclosed',page=paged?Math.min(Math.max(0,Math.floor(Number(filters.page)||0)),Math.max(0,Math.ceil(jobs.length/MAX_JOBS)-1)):0;
+  const visible=jobs.slice(page*MAX_JOBS,(page+1)*MAX_JOBS);
   const tabs=compact?TABS.filter(t=>['mine','recent'].includes(t.id)).map(t=>({...t,label:t.id==='mine'?'My day':'My completed'})):TABS;
   const tabButtons = tabs.map((t) => ({
     type: 'button',
@@ -202,7 +207,7 @@ function boardBlocks(store, filters) {
 
   const blocks = [
     { type: 'header', text: { type: 'plain_text', text: compact?'🔧 My jobs':'🔧 TPS Job Board' } },
-    { type: 'section', text: { type: 'mrkdwn', text: compact?`*${filters.tab==='recent'?'My completed jobs':'My day'}:* ${jobs.length} call${jobs.length===1?'':'s'}`:summary(store.jobs) } },
+    { type: 'section', text: { type: 'mrkdwn', text: compact?`*${filters.tab==='recent'?'My completed jobs':'My day'}:* ${jobs.length} call${jobs.length===1?'':'s'}`:paged?`*Completed—not closed:* ${jobs.length} calls · Completed ${jobs.filter(j=>j.workflowStage==='done').length} · Price These ${jobs.filter(j=>j.workflowStage==='price').length} · Closing ${jobs.filter(j=>j.workflowStage==='closing').length}`:summary(store.jobs) } },
     { type: 'actions', block_id: 'tabs', elements: tabButtons },
     {
       type: 'actions',
@@ -227,7 +232,8 @@ function boardBlocks(store, filters) {
   }
   const today = dayKey(new Date());
   let lastGroup = null;
-  for (const job of jobs.slice(0, MAX_JOBS)) {
+  for (const job of visible) {
+    if(paged){const group={done:'Completed — write descriptions',price:'Price These',closing:'Closing'}[job.workflowStage];if(group!==lastGroup)blocks.push({type:'section',text:{type:'mrkdwn',text:`*${group}*`}});lastGroup=group;}
     if (filters.tab === 'today') {
       const group=yesterdayStuck(job,new Date())?'⚠️ Yesterday — stuck calls':job.status==='done'?'✅ Done today':job.status==='pending'?'🟡 Pending completion':job.status==='assigned'?'👷 Assigned':'📅 Scheduled & new calls';
       if (group !== lastGroup) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${group}*` } });
@@ -235,7 +241,8 @@ function boardBlocks(store, filters) {
     }
     blocks.push(...jobBlocks(job, filters.user));
   }
-  if (jobs.length > MAX_JOBS) {
+  if(paged&&jobs.length>MAX_JOBS){blocks.push({type:'actions',elements:[...(page>0?[{type:'button',action_id:'unclosed_page_prev',text:{type:'plain_text',text:'Previous'},value:String(page-1)}]:[]),...(page+1<Math.ceil(jobs.length/MAX_JOBS)?[{type:'button',action_id:'unclosed_page_next',text:{type:'plain_text',text:'Next'},value:String(page+1)}]:[])]},{type:'context',elements:[{type:'mrkdwn',text:`Showing ${page*MAX_JOBS+1}–${Math.min((page+1)*MAX_JOBS,jobs.length)} of ${jobs.length} · Page ${page+1} of ${Math.ceil(jobs.length/MAX_JOBS)}`}]});}
+  if (!paged&&jobs.length > MAX_JOBS) {
     blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${jobs.length - MAX_JOBS} more. Filter by tech to narrow the list.` }] });
   }
   const updated = store.updatedAt
