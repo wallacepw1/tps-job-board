@@ -34,9 +34,12 @@ function verify(folderId,jobNumber,exp,sig,o={},now=Date.now()){
  if(Number(exp)<now/1000)return false;
  return timingSafeEqual(Buffer.from(sig),Buffer.from(sign(folderId,jobNumber,exp,o)));
 }
-function galleryUrl(folderId,jobNumber,o={},now=Date.now()){
- const exp=Math.floor(now/1000)+TTL_SEC;
- return`${baseUrl(o)}/job-files/${folderId}?job=${jobNumber}&exp=${exp}&sig=${sign(folderId,jobNumber,exp,o)}`;
+function signedQuery(folderId,jobNumber,o={},now=Date.now(),ttl=TTL_SEC){
+ const exp=Math.floor(now/1000)+ttl;
+ return`job=${jobNumber}&exp=${exp}&sig=${sign(folderId,jobNumber,exp,o)}`;
+}
+function galleryUrl(folderId,jobNumber,o={},now=Date.now(),ttl=TTL_SEC){
+ return`${baseUrl(o)}/job-files/${folderId}?${signedQuery(folderId,jobNumber,o,now,ttl)}`;
 }
 
 // The Work Object as posted on a message (no preview_url there; Slack asks for it on click).
@@ -46,8 +49,52 @@ function entity(jobNumber,folderId,previewUrl){
  return{url:folderUrl(folderId),external_ref:{id:refId(jobNumber,folderId),type:REF_TYPE},entity_type:ENTITY_TYPE,
   entity_payload:{attributes:{title:{text:`Job files · ${jobNumber}`},product_name:'TPS Job Files',full_size_preview:preview},fields:{}}};
 }
+const FILES_ACTION='tps_job_files_open';
+function filesButton(jobNumber,folderId){return{type:'button',action_id:FILES_ACTION,text:{type:'plain_text',text:'Files'},value:`${jobNumber}:${folderId}`};}
 function cardMessage(channel,jobNumber,folderId){
- return{channel,text:`📁 Job files · ${jobNumber}: work order, photos and videos in Drive. Click the card to open them here.`,unfurl_links:false,unfurl_media:false,metadata:{entities:[entity(jobNumber,folderId)]}};
+ const text=`📁 Job files · ${jobNumber}: work order, photos and videos in Drive.`;
+ return{channel,text,unfurl_links:false,unfurl_media:false,
+  blocks:[{type:'section',text:{type:'mrkdwn',text}},{type:'actions',elements:[filesButton(jobNumber,folderId)]}],
+  metadata:{entities:[entity(jobNumber,folderId)]}};
+}
+function parseFilesValue(v){const m=String(v||'').match(/^(\d{5,7}):([\w-]{10,100})$/);return m?{jobNumber:m[1],folderId:m[2]}:null;}
+
+// The Files pop-up (works on phones, where the side panel embed does not). Slack fetches every image itself,
+// so image links are signed for longer than the panel's 10 minutes.
+const MODAL_IMG_TTL=7*24*3600,MODAL_LINK_TTL=24*3600,MODAL_MAX=40;
+const plain=t=>({type:'plain_text',text:String(t).slice(0,150),emoji:true});
+function loadingModal(jobNumber){return{type:'modal',callback_id:'tps_job_files',title:plain(`Job ${jobNumber} files`),close:plain('Close'),blocks:[{type:'section',text:{type:'mrkdwn',text:':hourglass_flowing_sand: Loading the job folder…'}}]};}
+function filesModal({jobNumber,folderId,files},o={},now=Date.now()){
+ const order={pdf:0,photo:1,video:2,file:3,folder:4};
+ const sorted=[...files].sort((a,b)=>order[kindOf(a)]-order[kindOf(b)]||String(a.createdTime).localeCompare(String(b.createdTime)));
+ const img=signedQuery(folderId,jobNumber,o,now,MODAL_IMG_TTL),link=signedQuery(folderId,jobNumber,o,now,MODAL_LINK_TTL),base=baseUrl(o);
+ const thumb=(f,w)=>`${base}/job-files/${folderId}/thumb/${encodeURIComponent(f.id)}?${img}&w=${w}`;
+ const viewer=f=>`${base}/job-files/${folderId}/view/${encodeURIComponent(f.id)}?${link}`;
+ const counts=sorted.reduce((c,f)=>(c[kindOf(f)]=(c[kindOf(f)]||0)+1,c),{});
+ const label=(n,w)=>n?`${n} ${w}${n===1?'':'s'}`:'';
+ const summary=[label(counts.pdf,'PDF'),label(counts.photo,'photo'),label(counts.video,'video')].filter(Boolean).join(' · ')||'No files yet';
+ const blocks=[{type:'section',text:{type:'mrkdwn',text:`*Job ${jobNumber}* · ${summary}`},accessory:{type:'button',action_id:'tps_job_files_drive',text:plain('Open in Drive'),url:folderUrl(folderId)}}];
+ for(const f of sorted.slice(0,MODAL_MAX)){
+  const k=kindOf(f);
+  if(k==='photo')blocks.push({type:'image',image_url:thumb(f,1000),alt_text:f.name.slice(0,200),title:plain(f.name)});
+  else if(k==='pdf'){blocks.push({type:'divider'},{type:'section',text:{type:'mrkdwn',text:`:page_facing_up: *${f.name.replace(/[*_~`<>&]/g,'')}*`},accessory:{type:'button',action_id:`tps_job_files_pdf_${f.id}`.slice(0,255),text:plain('View PDF'),url:viewer(f)}},{type:'image',image_url:thumb(f,1000),alt_text:`First page of ${f.name}`.slice(0,200)});}
+  else blocks.push({type:'section',text:{type:'mrkdwn',text:`${k==='video'?':movie_camera:':':paperclip:'} ${f.name.replace(/[*_~`<>&]/g,'')}`},accessory:{type:'button',action_id:`tps_job_files_open_${f.id}`.slice(0,255),text:plain(k==='video'?'Play':'Open'),url:viewLink(f)}});
+ }
+ if(sorted.length>MODAL_MAX)blocks.push({type:'context',elements:[{type:'mrkdwn',text:`Showing ${MODAL_MAX} of ${sorted.length}. Open in Drive for the rest.`}]});
+ if(!sorted.length)blocks.push({type:'section',text:{type:'mrkdwn',text:'Nothing in this job folder yet.'}});
+ return{type:'modal',callback_id:'tps_job_files',title:plain(`Job ${jobNumber} files`),close:plain('Close'),blocks:blocks.slice(0,100)};
+}
+// A Files button click from a TPS Bot message. Opens right away (the trigger lasts 3 seconds), then fills in.
+async function openFilesModal(payload,o={}){
+ const ref=parseFilesValue(payload?.actions?.[0]?.value);if(!ref)return'bad value';
+ const token=env(o,'TPS_BOT_TOKEN');if(!token)return'TPS_BOT_TOKEN is not set';
+ const fetcher=o.fetch||global.fetch;
+ const opened=await slackApi('views.open',{trigger_id:payload.trigger_id,view:loadingModal(ref.jobNumber)},token,fetcher);
+ let view;
+ try{view=filesModal({...ref,files:await listFolder(ref.folderId,o)},o);}
+ catch(e){view={...loadingModal(ref.jobNumber),blocks:[{type:'section',text:{type:'mrkdwn',text:`Couldn't read the Drive folder right now. <${folderUrl(ref.folderId)}|Open it in Drive>`}}]};}
+ await slackApi('views.update',{view_id:opened.view.id,view},token,fetcher);
+ return'opened';
 }
 
 async function slackApi(method,body,token,fetcher){
@@ -186,8 +233,8 @@ function registerJobFilesGallery(receiver,o={}){
   if(!verify(folder,job,exp,sig,o)||!/^[\w-]{10,100}$/.test(file))return res.status(403).end();
   try{
    const f=(await listFolder(folder,o)).find(x=>x.id===file);if(!f)return res.status(404).end();
-   const fetcher=o.fetch||global.fetch;
-   const urls=[f.thumbnailLink&&f.thumbnailLink.replace(/=s\d+$/,'=s600'),`https://drive.google.com/thumbnail?id=${file}&sz=w600`].filter(Boolean);
+   const fetcher=o.fetch||global.fetch,size=Math.min(1600,Math.max(200,Number(req.query.w)||600));
+   const urls=[f.thumbnailLink&&f.thumbnailLink.replace(/=s\d+$/,`=s${size}`),`https://drive.google.com/thumbnail?id=${file}&sz=w${size}`].filter(Boolean);
    for(const u of urls){
     const r=await fetcher(u,{redirect:'follow',signal:AbortSignal.timeout(8000)}).catch(()=>null);
     const type=r?.headers?.get?.('content-type')||'';
@@ -222,4 +269,4 @@ async function postJobFilesCard({channel,jobNumber,filesUrl},o={}){
  return slackApi('chat.postMessage',cardMessage(channel,jobNumber,folderId),token,o.fetch||global.fetch);
 }
 
-module.exports={viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
+module.exports={FILES_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};

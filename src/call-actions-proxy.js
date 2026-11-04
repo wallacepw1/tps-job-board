@@ -1,6 +1,6 @@
 'use strict';
 const {createHmac,timingSafeEqual}=require('node:crypto');
-const {parseRef,presentJobFiles}=require('./job-files');
+const {parseRef,presentJobFiles,FILES_ACTION,openFilesModal}=require('./job-files');
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 function verifySlackRequest(raw,headers,secret,now=Date.now()){
  const ts=headers['x-slack-request-timestamp'],signature=headers['x-slack-signature'];
@@ -48,6 +48,10 @@ function registerCallActionsProxy(receiver,options={}){
    if(!verifySlackRequest(raw,req.headers,secret)){res.status(401).send('Request could not be verified.');return;}
    if(!(options.key||process.env.TPS_INTERNAL_KEY)){res.status(503).send('Call controls are not connected.');return;}
    const payload=JSON.parse(new URLSearchParams(raw).get('payload'));
+   // Files button on a TPS Bot card: open the files pop-up here, without a Latenode run.
+   if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===FILES_ACTION){res.status(200).send('');console.log('job files modal',await openFilesModal(payload,options).catch(e=>e.message));return;}
+   // Link buttons inside the files pop-up need only an acknowledgement.
+   if(payload.type==='block_actions'&&/^tps_job_files_/.test(payload.actions?.[0]?.action_id||'')){res.status(200).send('');return;}
    const quick=payload.type==='block_actions'||payload.view?.callback_id==='job_assignment';
    if(quick){res.status(200).send('');relayCallAction(raw,req.headers,options).catch(()=>console.error('Verified call action relay failed'));return;}
    const out=await relayCallAction(raw,req.headers,options);res.status(out.status).type('application/json').send(out.body);

@@ -63,3 +63,25 @@ test('raw proxy streams a signed PDF from Drive with CORS for the null-origin em
  const bad={...res,h:{},code:undefined,set:res.set,status:res.status,send:res.send,end:res.end};
  await routes['/job-files/:folder/raw/:file']({params:{folder:FOLDER,file:'other1aaaaaaaa'},query:q},bad);assert.equal(bad.code,404);
 });
+test('Files pop-up: photos as images, PDFs with a viewer link and first page, long-lived signed image links',()=>{
+ const now=1793719200000,v=jf.filesModal({jobNumber:'132198',folderId:FOLDER,files:[
+  {id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'},{id:'pdf1aaaaaaaaaa',name:'wo.pdf',mimeType:'application/pdf'},{id:'vid1aaaaaaaaaa',name:'v.mp4',mimeType:'video/mp4'}]},o,now);
+ assert.equal(v.type,'modal');assert.ok(v.blocks.length<=100);
+ const imgs=v.blocks.filter(b=>b.type==='image');assert.equal(imgs.length,2);
+ const u=new URL(imgs[1].image_url);assert.equal(u.pathname,`/job-files/${FOLDER}/thumb/img1aaaaaaaaaa`);
+ assert.ok(Number(u.searchParams.get('exp'))-now/1000>6*24*3600);assert.ok(jf.verify(FOLDER,'132198',u.searchParams.get('exp'),u.searchParams.get('sig'),o,now));
+ const pdfBtn=v.blocks.find(b=>b.accessory?.text?.text==='View PDF');assert.match(pdfBtn.accessory.url,/\/view\/pdf1aaaaaaaaaa\?/);
+ assert.ok(v.blocks.some(b=>b.accessory?.text?.text==='Play'));
+});
+test('card carries the Work Object and a Files button that names the job and folder',()=>{
+ const m=jf.cardMessage('C1','132198',FOLDER),b=m.blocks[1].elements[0];
+ assert.equal(b.action_id,jf.FILES_ACTION);assert.deepEqual(jf.parseFilesValue(b.value),{jobNumber:'132198',folderId:FOLDER});
+ assert.equal(jf.parseFilesValue('x:y'),null);
+});
+test('openFilesModal opens a loading view on the trigger, then fills it from Drive',async()=>{
+ const calls=[];jf._listCache.clear();
+ const fetch=async(url,init)=>{if(url.startsWith('https://slack.com/api/')){calls.push({m:url.split('/').pop(),b:JSON.parse(init.body)});return{ok:true,json:async()=>({ok:true,view:{id:'V1'}})};}return{ok:true,json:async()=>({files:[{id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'}]})};};
+ const r=await jf.openFilesModal({trigger_id:'T1',actions:[{action_id:jf.FILES_ACTION,value:`132198:${FOLDER}`}]},{...o,TPS_BOT_TOKEN:'x',fetch});
+ assert.equal(r,'opened');assert.deepEqual(calls.map(c=>c.m),['views.open','views.update']);
+ assert.equal(calls[0].b.trigger_id,'T1');assert.equal(calls[1].b.view_id,'V1');assert.ok(calls[1].b.view.blocks.some(b=>b.type==='image'));
+});
