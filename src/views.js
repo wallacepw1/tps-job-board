@@ -1,6 +1,7 @@
 // Block Kit layouts for the Home tab, the /jobs modal and single-job details.
 const { dayKey, TZ } = require('./jobs');
 const { assignmentActions } = require('./assignment');
+const {boardRole,canViewJob,scopedJobs,scopedFilters}=require('./board-scope');
 
 const STATUS = {
   new: { emoji: '🆕', label: 'New' },
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'week', label: 'This week' },
   { id: 'open', label: 'All open' },
   { id: 'recent', label: 'Done (7 days)' },
+  { id: 'history', label: 'Past calls' },
 ];
 
 const MAX_JOBS = 28; // Slack allows 100 blocks per view; each job uses 3, plus headers.
@@ -93,6 +95,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
       case 'open': return j.status !== 'done' && (day >= today || carriedOver(j, today) || Boolean(j.needsDate));
       case 'stuck': return stuckCall(j, today);
       case 'recent': return j.status === 'done' && (j.completedAt || j.when || j.postedAt || 0) >= weekAgo;
+      case 'history': return j.status==='done'||Boolean(day&&day<today);
       default: return true;
     }
   });
@@ -110,22 +113,25 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
     list.sort((a, b) => rank(a) - rank(b) || (a.when || 0) - (b.when || 0));
   }
   if (tab === 'stuck') list.sort((a, b) => (a.when || 0) - (b.when || 0));
+  if (tab === 'history') list.sort((a,b)=>(b.completedAt||b.when||b.postedAt||0)-(a.completedAt||a.when||a.postedAt||0));
   if (tab === 'recent') list.sort((a, b) => (b.completedAt || b.when || 0) - (a.completedAt || a.when || 0));
   return list;
 }
 
 function jobBlocks(job, actor) {
+  if(!canViewJob(job,actor))return[{type:'section',text:{type:'mrkdwn',text:'This call is not assigned to you.'}}];
+  const compact=boardRole(actor)==='plumber';
   const st = STATUS[job.status]||STATUS.new;
-  const title = [`*${job.jobNumber}*`, job.emergency ? '🚨' : null, job.client ? `· ${job.client}` : null]
+  const title = [`*${job.jobNumber}*`, job.emergency ? '🚨' : null, job.client ? `· ${truncate(job.client,compact?80:120)}` : null]
     .filter(Boolean).join(' ');
   const lines = [
     `${title}`,
-    job.location ? `📍 ${job.location}` : null,
+    job.location ? `📍 ${truncate(job.location,180)}` : null,
     job.issue ? `🔧 ${truncate(job.issue, 140)}` : null,
   ].filter(Boolean);
 
   const buttons = [
-    threadUrl(job) && button('Thread', threadUrl(job), `thread_${job.jobNumber}`),
+    (compact?job.assignedMessageUrl||threadUrl(job):threadUrl(job)) && button('Thread', compact?job.assignedMessageUrl||threadUrl(job):threadUrl(job), `thread_${job.jobNumber}`),
     // Waiting in #future-calls until a tech is picked; then the tech's channel message takes over.
     job.status!=='done'&&job.techId&&job.assignedMessageUrl&&button('Tech chat',job.assignedMessageUrl,`techmsg_${job.jobNumber}`),
     job.filesUrl && button('Files', job.filesUrl, `files_${job.jobNumber}`),
@@ -136,12 +142,12 @@ function jobBlocks(job, actor) {
       type: 'button', text: { type: 'plain_text', text: '📸 Add videos/notes' }, action_id: `addnote_${job.jobNumber}`, value: job.jobNumber,
     },
     ...assignmentActions(job, actor),
-  ].filter(Boolean);
+  ].filter(Boolean).filter(b=>!compact||b.text.text==='Thread'||b.text.text==='Files'||b.text.text==='Map'||b.action_id.startsWith('addnote_'));
 
   const meta = [
     `${st.emoji} *${st.label}*`,
     `🕘 ${fmtTime(job)}`,
-    `👷 ${job.tech || '_Unassigned_'}`,
+    !compact ? `👷 ${job.tech || '_Unassigned_'}` : job.helperId===actor ? `Helping ${job.tech||'lead plumber'}` : null,
     job.workOrder ? `WO ${job.workOrder}` : null,
     job.helperId ? `Helper: <@${job.helperId}>` : null,
     job.mismatch ? '⚠️ Slack and calendar dates differ' : null,
@@ -171,8 +177,14 @@ function summary(jobs, now = new Date()) {
 }
 
 function boardBlocks(store, filters) {
-  const jobs = filterJobs(store.jobs, filters);
-  const tabButtons = TABS.map((t) => ({
+  const role=boardRole(filters.user),compact=role==='plumber';
+  if(role==='none')return[{type:'section',text:{type:'mrkdwn',text:'The Job Board is available to TPS staff.'}}];
+  filters=scopedFilters(filters);
+  let source=scopedJobs(store.jobs,filters.user);
+  if(compact&&filters.tab==='mine')source=source.filter(j=>doneOn(j,dayKey(new Date()))||j.status!=='done'&&j.when&&dayKey(j.when)===dayKey(new Date()));
+  const jobs = filterJobs(source, filters);
+  const tabs=compact?TABS.filter(t=>['mine','recent'].includes(t.id)).map(t=>({...t,label:t.id==='mine'?'My day':'My completed'})):TABS;
+  const tabButtons = tabs.map((t) => ({
     type: 'button',
     text: { type: 'plain_text', text: t.label },
     action_id: `tab_${t.id}`,
@@ -187,8 +199,8 @@ function boardBlocks(store, filters) {
   const selected = techOptions.find((o) => o.value === filters.tech) || techOptions[0];
 
   const blocks = [
-    { type: 'header', text: { type: 'plain_text', text: '🔧 TPS Job Board' } },
-    { type: 'section', text: { type: 'mrkdwn', text: summary(store.jobs) } },
+    { type: 'header', text: { type: 'plain_text', text: compact?'🔧 My jobs':'🔧 TPS Job Board' } },
+    { type: 'section', text: { type: 'mrkdwn', text: compact?`*${filters.tab==='recent'?'My completed jobs':'My day'}:* ${jobs.length} call${jobs.length===1?'':'s'}`:summary(store.jobs) } },
     { type: 'actions', block_id: 'tabs', elements: tabButtons },
     {
       type: 'actions',
@@ -201,6 +213,7 @@ function boardBlocks(store, filters) {
     },
     { type: 'divider' },
   ];
+  if(compact)blocks.find(b=>b.block_id==='filters').elements=blocks.find(b=>b.block_id==='filters').elements.filter(e=>e.action_id==='refresh');
   if(store.refreshError)blocks.push({type:'section',text:{type:'mrkdwn',text:'⚠️ Refresh could not finish. Showing the last verified board; please refresh before changing a call.'}});
 
   if (filters.tab === 'stuck') {
@@ -297,6 +310,7 @@ function modalView(store, filters) {
 }
 
 function jobModal(job, actor) {
+  if(!canViewJob(job,actor))return messageModal('Job Board','This call is not assigned to you.');
   return {
     type: 'modal',
     title: { type: 'plain_text', text: `Job ${job.jobNumber}` },
