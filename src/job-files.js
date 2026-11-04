@@ -76,6 +76,19 @@ async function listFolder(folderId,o={}){
  return files;
 }
 
+const CSS=`:root{--bg:#fff;--fg:#1d1c1d;--muted:#616061;--line:#e8e8e8;--tile:#f6f6f6;--accent:#1264a3}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1d21;--fg:#d1d2d3;--muted:#9a9b9e;--line:#35373b;--tile:#222529;--accent:#1d9bd1}}
+*{box-sizing:border-box}body{margin:0;padding:12px;background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}h1{font-size:16px;margin:0}
+.muted{color:var(--muted);font-size:13px}a{color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.tile{display:block;text-decoration:none;color:inherit;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--tile)}
+.pic{position:relative;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.pic img{width:100%;height:100%;object-fit:cover}.pdf .pic img{object-fit:contain;background:#fff}
+.badge{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:2px 6px;border-radius:4px}
+.name{padding:6px 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty{padding:24px 0;color:var(--muted)}
+`;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function kindOf(f){const m=f.mimeType||'';return m.startsWith('image/')?'photo':m.startsWith('video/')?'video':m==='application/pdf'?'pdf':m==='application/vnd.google-apps.folder'?'folder':'file';}
 const viewLink=f=>f.webViewLink||(kindOf(f)==='folder'?folderUrl(f.id):`https://drive.google.com/file/d/${f.id}/view`);
@@ -89,24 +102,44 @@ function galleryHtml({jobNumber,folderId,files,query}){
  const thumb=f=>`/job-files/${folderId}/thumb/${encodeURIComponent(f.id)}?${query}`;
  const tile=f=>{const k=kindOf(f),badge={video:'▶ Video',pdf:'PDF',file:'File',folder:'Folder'}[k]||'';
   const img=(f.thumbnailLink||k==='photo'||k==='video'||k==='pdf')?`<img loading="lazy" src="${esc(thumb(f))}" alt="" onerror="this.remove()">`:'';
-  return`<a class="tile ${k}" href="${esc(viewLink(f))}" target="_blank" rel="noopener"><div class="pic">${img}${badge?`<span class="badge">${badge}</span>`:''}</div><div class="name">${esc(f.name)}</div></a>`;};
+  const inPanel=k==='photo'||k==='pdf';
+  const href=inPanel?`/job-files/${folderId}/view/${encodeURIComponent(f.id)}?${query}`:viewLink(f);
+  return`<a class="tile ${k}" href="${esc(href)}"${inPanel?'':' target="_blank" rel="noopener"'}><div class="pic">${img}${badge?`<span class="badge">${badge}</span>`:''}</div><div class="name">${esc(f.name)}</div></a>`;};
  return`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Job files ${esc(jobNumber)}</title>
-<style>
-:root{--bg:#fff;--fg:#1d1c1d;--muted:#616061;--line:#e8e8e8;--tile:#f6f6f6;--accent:#1264a3}
-@media (prefers-color-scheme:dark){:root{--bg:#1a1d21;--fg:#d1d2d3;--muted:#9a9b9e;--line:#35373b;--tile:#222529;--accent:#1d9bd1}}
-*{box-sizing:border-box}body{margin:0;padding:12px;background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}h1{font-size:16px;margin:0}
-.muted{color:var(--muted);font-size:13px}a{color:var(--accent)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
-.tile{display:block;text-decoration:none;color:inherit;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--tile)}
-.pic{position:relative;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.pic img{width:100%;height:100%;object-fit:cover}.pdf .pic img{object-fit:contain;background:#fff}
-.badge{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:2px 6px;border-radius:4px}
-.name{padding:6px 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.empty{padding:24px 0;color:var(--muted)}
+<style>${CSS}
 </style></head><body>
 <header><div><h1>Job ${esc(jobNumber)}</h1><div class="muted">${esc(summary)}</div></div><a href="${esc(folderUrl(folderId))}" target="_blank" rel="noopener">Open in Drive</a></header>
 ${sorted.length?`<div class="grid">${sorted.map(tile).join('')}</div>`:'<div class="empty">Nothing in this job folder yet.</div>'}
+</body></html>`;
+}
+
+const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174';
+const MAX_RAW=40*1024*1024;
+// One photo or PDF, shown inside the side panel. PDFs are drawn page by page with PDF.js (no browser plugin is
+// available inside Slack's sandboxed frame), from this app's /raw proxy of the Drive file.
+function viewerHtml({jobNumber,folderId,file,query}){
+ const back=`/job-files/${folderId}?${query}`,raw=`/job-files/${folderId}/raw/${encodeURIComponent(file.id)}?${query}`,k=kindOf(file);
+ const body=k==='pdf'
+  ?`<div id="pages" class="muted">Loading PDF…</div>
+<script src="${PDFJS}/pdf.min.js"></script>
+<script>
+(async()=>{const box=document.getElementById('pages');try{
+ pdfjsLib.GlobalWorkerOptions.workerSrc='${PDFJS}/pdf.worker.min.js';
+ const pdf=await pdfjsLib.getDocument({url:${JSON.stringify(raw)}}).promise;box.textContent='';box.className='';
+ const width=Math.min(document.body.clientWidth-24,1400);
+ for(let n=1;n<=pdf.numPages;n++){const page=await pdf.getPage(n),v=page.getViewport({scale:1}),scale=width/v.width*(window.devicePixelRatio||1),vp=page.getViewport({scale});
+  const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;c.style.width=width+'px';box.appendChild(c);await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;}
+}catch(e){box.textContent="Couldn't show this PDF here. Use Open in Drive.";}})();
+</script>`
+  :`<img class="full" src="${esc(raw)}" alt="${esc(file.name)}">`;
+ return`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(file.name)}</title>
+<style>${CSS}
+nav{display:flex;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:13px}.fname{font-weight:600;margin-bottom:8px;word-break:break-all}
+img.full{max-width:100%;height:auto;border-radius:6px}canvas{display:block;margin:0 auto 10px;background:#fff;box-shadow:0 0 0 1px var(--line);max-width:100%}
+</style></head><body>
+<nav><a href="${esc(back)}">← Job ${esc(jobNumber)} files</a><a href="${esc(viewLink(file))}" target="_blank" rel="noopener">Open in Drive</a></nav>
+<div class="fname">${esc(file.name)}</div>
+${body}
 </body></html>`;
 }
 
@@ -122,6 +155,31 @@ function registerJobFilesGallery(receiver,o={}){
   if(!verify(folder,job,exp,sig,o))return res.status(403).type('html').send(errorHtml('This link has expired. Close the panel and click the job files card again.'));
   try{const files=await listFolder(folder,o);res.type('html').send(galleryHtml({jobNumber:job,folderId:folder,files,query:new URLSearchParams({job,exp,sig}).toString()}));}
   catch(e){console.error('job files list failed',folder,e.message);res.status(502).type('html').send(errorHtml(`Couldn't read the Drive folder right now. Open it in Drive instead: ${folderUrl(folder)}`));}
+ });
+ const fileOf=async(req,res)=>{
+  const {folder,file}=req.params,{job,exp,sig}=req.query;
+  if(!verify(folder,job,exp,sig,o)||!/^[\w-]{10,100}$/.test(file)){res.status(403).end();return null;}
+  const f=(await listFolder(folder,o)).find(x=>x.id===file);if(!f){res.status(404).end();return null;}
+  return{f,folder,job,query:new URLSearchParams({job,exp,sig}).toString()};
+ };
+ receiver.router.get('/job-files/:folder/view/:file',async(req,res)=>{
+  frame(res);
+  try{const x=await fileOf(req,res);if(!x)return;
+   if(!['photo','pdf'].includes(kindOf(x.f)))return res.redirect(viewLink(x.f));
+   res.type('html').send(viewerHtml({jobNumber:x.job,folderId:x.folder,file:x.f,query:x.query}));
+  }catch{if(!res.headersSent)res.status(502).type('html').send(errorHtml("Couldn't read the Drive folder right now."));}
+ });
+ // The file itself, for the viewer. The embed runs with a null origin, so this answers any origin;
+ // the signed, 10-minute link and the folder check are what protect it.
+ receiver.router.get('/job-files/:folder/raw/:file',async(req,res)=>{
+  res.set('Access-Control-Allow-Origin','*');
+  try{const x=await fileOf(req,res);if(!x)return;
+   if(!['photo','pdf'].includes(kindOf(x.f))||Number(x.f.size||0)>MAX_RAW)return res.status(415).end();
+   const r=await(o.fetch||global.fetch)(`https://www.googleapis.com/drive/v3/files/${x.f.id}?alt=media&supportsAllDrives=true&key=${encodeURIComponent(env(o,'GOOGLE_API_KEY'))}`,{signal:AbortSignal.timeout(30000)});
+   if(!r.ok)return res.status(502).end();
+   res.set('Content-Type',x.f.mimeType).set('Cache-Control','private, max-age=600');
+   res.send(Buffer.from(await r.arrayBuffer()));
+  }catch{if(!res.headersSent)res.status(502).end();}
  });
  receiver.router.get('/job-files/:folder/thumb/:file',async(req,res)=>{
   const {folder,file}=req.params,{job,exp,sig}=req.query;
@@ -164,4 +222,4 @@ async function postJobFilesCard({channel,jobNumber,filesUrl},o={}){
  return slackApi('chat.postMessage',cardMessage(channel,jobNumber,folderId),token,o.fetch||global.fetch);
 }
 
-module.exports={folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
+module.exports={viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
