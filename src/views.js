@@ -2,6 +2,7 @@
 const { dayKey, TZ } = require('./jobs');
 const { assignmentActions } = require('./assignment');
 const {boardRole,canViewJob,scopedJobs,scopedFilters}=require('./board-scope');
+const {goUrl}=require('./job-files');
 
 const STATUS = {
   new: { emoji: '🆕', label: 'New' },
@@ -137,7 +138,7 @@ function jobBlocks(job, actor) {
     (compact?job.assignedMessageUrl||threadUrl(job):threadUrl(job)) && button('Thread', compact?job.assignedMessageUrl||threadUrl(job):threadUrl(job), `thread_${job.jobNumber}`),
     // Waiting in #future-calls until a tech is picked; then the tech's channel message takes over.
     job.status!=='done'&&job.techId&&job.assignedMessageUrl&&button('Tech chat',job.assignedMessageUrl,`techmsg_${job.jobNumber}`),
-    job.filesUrl && button('Files', job.filesUrl, `files_${job.jobNumber}`),
+    job.filesUrl && button('Files', goUrl(job.filesUrl, job.jobNumber), `files_${job.jobNumber}`),
     job.status!=='done'&&mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
     job.status==='done'&&['price','closing'].includes(job.workflowStage)&&job.workflowMessageUrl&&button(job.workflowStage==='price'?'Price These':'Closing',job.workflowMessageUrl,`completed_${job.jobNumber}`),
     job.status==='done'&&!['price','closing'].includes(job.workflowStage)&&job.completedMessageUrl&&button('Completed',job.completedMessageUrl,`completed_${job.jobNumber}`),

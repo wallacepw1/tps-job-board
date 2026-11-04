@@ -114,3 +114,18 @@ test('video route streams Drive bytes with Range for a plain player',async()=>{
  assert.deepEqual(sent,{Range:'bytes=0-'});assert.deepEqual([...Buffer.concat(res.chunks)],[1,2,3]);
  const res2=mk();await routes['/job-files/:folder/video/:file']({...req,params:{folder:FOLDER,file:'img1aaaaaaaaaa'}},res2);assert.equal(res2.code,415);
 });
+test('Files link keeps the Drive folder URL and opens a freshly signed gallery',async()=>{
+ const u=jf.goUrl(`https://drive.google.com/drive/folders/${FOLDER}?usp=drive_link`,'132275',o);
+ assert.equal(u,`https://board.example/job-files/go?job=132275&f=https://drive.google.com/drive/folders/${FOLDER}`);
+ assert.equal(u.match(/https:\/\/drive\.google\.com\/drive\/folders\/[\w-]+/)[0],`https://drive.google.com/drive/folders/${FOLDER}`,'Call Route can still read the folder');
+ assert.equal(jf.goUrl('https://example.com','132275',o),'https://example.com');
+ const routes={};let name='132275';
+ jf.registerJobFilesGallery({router:{get:(p,h)=>routes[p]=h}},{...o,fetch:async()=>({ok:true,json:async()=>({name,mimeType:'application/vnd.google-apps.folder'})})});
+ const mk=()=>({set(){return this;},status(n){this.code=n;return this;},type(){return this;},send(b){this.body=b;return this;},redirect(l){this.loc=l;return this;}});
+ let res=mk();await routes['/job-files/go']({query:{job:'132275',f:`https://drive.google.com/drive/folders/${FOLDER}`}},res);
+ const g=new URL(res.loc);assert.equal(g.pathname,`/job-files/${FOLDER}`);
+ assert.ok(jf.verify(FOLDER,'132275',g.searchParams.get('exp'),g.searchParams.get('sig'),o,Date.now()+11*3600e3));
+ res=mk();await routes['/job-files/go']({query:{job:'132276',f:`https://drive.google.com/drive/folders/${FOLDER}`}},res);
+ assert.equal(res.loc,`https://drive.google.com/drive/folders/${FOLDER}`,'folder not named for the job goes to Drive');
+ res=mk();await routes['/job-files/go']({query:{job:'x',f:'y'}},res);assert.equal(res.code,400);
+});
