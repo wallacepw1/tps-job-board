@@ -1,6 +1,7 @@
 'use strict';
 const {verifySlackRequest}=require('./call-actions-proxy');
 const {assistantMeldRequest}=require('./assistant-meld-relay');
+const {handlePhone}=require('./phone-admin');
 const TARGET='https://webhook.latenode.com/27333/prod/media-bot-slack-events';
 function parseAssistantBody(raw){
  try{return JSON.parse(raw);}catch{
@@ -29,6 +30,9 @@ function registerAssistantEventsProxy(receiver,options={}){
    if(!verifySlackRequest(raw,req.headers,options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET))return res.status(401).send('Request could not be verified.');
    const body=parseAssistantBody(raw);
    if(body.type==='url_verification')return res.status(200).send(body.challenge);
+   // Phone settings (/admin phone) are answered here, never relayed to Latenode.
+   const phone=handlePhone(body,{fetch:options.fetch,load:options.loadPhone});
+   if(phone){if(phone.json)res.status(phone.status).json(phone.json);else res.status(phone.status).send(phone.body);return;}
    const meld=assistantMeldRequest(body,options.key||process.env.TPS_INTERNAL_KEY);
    if(meld){
     if(!meld.forward)return res.status(meld.status).send(meld.body);

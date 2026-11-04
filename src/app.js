@@ -23,6 +23,7 @@ registerJobFilesGallery(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
 receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:7}));
+receiver.router.get('/phone/health', (_req, res) => res.json({phonecom:!!process.env.PHONECOM_API_TOKEN,calendar:!!process.env.ONCALL_CALENDAR_ICS_URL,assistant:!!process.env.TPS_ASSISTANT_SIGNING_SECRET,version:1}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
