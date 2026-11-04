@@ -205,7 +205,7 @@ function errorHtml(msg){return`<!doctype html><meta charset="utf-8"><meta name="
 // ---- HTTP routes ----
 function registerJobFilesGallery(receiver,o={}){
  const frame=res=>res.set('Content-Security-Policy',FRAME_ANCESTORS).set('Cache-Control','private, max-age=60');
- receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET')}));
+ receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET'),videoTest:1}));
  receiver.router.get('/job-files/:folder',async(req,res)=>{
   frame(res);
   const {folder}=req.params,{job,exp,sig}=req.query;
