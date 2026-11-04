@@ -2,6 +2,7 @@
 const {timingSafeEqual}=require('node:crypto');
 const {createRuntime}=require('./assignment-runtime');
 const {handleAssignment,fingerprint}=require('./assignment-worker');
+const {assignWithNow,pendingAssignment}=require('./assign-now');
 const {assignmentModal,decodeDraft}=require('./assignment');
 const {ADMINS,TECHS}=require('./assignment-policy');
 const {idsOf,callFeedback}=require('./assignment-route');
@@ -17,16 +18,7 @@ async function handleEnvelope(e,options){
   if(saved.fingerprint!==fingerprint(r))return{status:'refused',error:'This result belongs to another request.'};
   const {fingerprint:privateFingerprint,request:privateRequest,...result}=saved;return result;
  }
- if(e.mode==='pending'){
-  const r=e.request||{};
-  if(!ADMINS.includes(r.actor)||!/^Rec[A-Z0-9]+$/i.test(r.recordId||''))return{status:'refused',error:'Invalid recovery request.'};
-  const read=async k=>{const v=await options.store.getGlobalVariable(k);return typeof v==='string'?JSON.parse(v):v;};
-  const state=await read('TPS_ASSIGN_STATE_'+r.recordId);
-  if(!state?.activeRequest)return{status:'done',pendingRequest:null};
-  const saved=await read('TPS_ASSIGN_REQUEST_'+state.activeRequest);
-  if(!saved?.request||saved.request.actor!==r.actor||saved.request.recordId!==r.recordId)return{status:'refused',error:'A pending action belongs to another admin. Ask that admin to verify it.'};
-  return{status:'done',pendingRequest:saved.request};
- }
+ if(e.mode==='pending')return pendingAssignment(e.request||{},options.store);
  if(options.enabled!==true)return{status:'refused',error:'Assignment processing is not enabled yet.'};
  if(e.mode==='helper_event'){
   const ctx=createRuntime({...options,actor:e.event?.user||''});
@@ -68,7 +60,7 @@ async function handleEnvelope(e,options){
    request={requestId:e.requestId,actor,operation,recordId:c.recordId,incomingTs:c.incomingTs,expectedLead:c.lead,expectedHelper:state.helper?.user||null,target};
   }
   if(!request)throw Error('Invalid assignment request.');
-  const result=await handleAssignment(request,ctx);
+  const result=await assignWithNow(request,ctx,options);
   if(e.event?.view?.id)shell=e.event.view.id;
   if(shell)await options.slack('views.update',{view_id:shell,view:messageView(result.status==='done'?'✅ Saved. The call history has been updated.':result.error||'⏳ Still queued. Refresh the Job Board shortly.')});
   if(result.status!=='done'){

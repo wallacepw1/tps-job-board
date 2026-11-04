@@ -9,6 +9,7 @@ async function handleAssignment(r,ctx){
  if(old&&old.fingerprint!==fp)return refused('This request ID belongs to a different action.');
  if(old&&['done','refused'].includes(old.status))return old;
  const state=await ctx.state.get(r.recordId)||{};
+ if(state.pendingAssignNow&&state.pendingAssignNow!==r.requestId&&state.pendingAssignNow!==r.parentAssignmentRequestId)return refused('An earlier assignment still needs verification. Use Check and resume.');
  if(state.activeRequest&&state.activeRequest!==r.requestId)return refused('Another action is still being verified for this call. Refresh shortly.');
  const now=()=>ctx.now?ctx.now():Date.now();
  const save=async result=>{const value={...result,request:structuredClone(r),requestId:r.requestId,fingerprint:fp,updatedAt:now()};await ctx.requests.set(r.requestId,value);return value;};
