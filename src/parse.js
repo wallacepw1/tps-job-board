@@ -1,6 +1,6 @@
 // Parsers for the PaulLatenode intake posts and thread replies in #incoming-calls.
 
-const ADDRESS_LINE = /,\s*CA\b/i;
+const ADDRESS_LINE = /\bCA(?:\s+\d{5}(?:-\d{4})?)?\s*$/i;
 
 function clean(text) {
   return (text || '')
@@ -18,6 +18,7 @@ function messageText(m) {
     if (Array.isArray(node)) { node.forEach((n) => collect(n, out)); return out; }
     if (typeof node.text === 'string') out.push(node.text);
     if (node.type === 'link' && node.url) out.push(node.url);
+    if (node.type === 'button' && /^https:\/\/drive\.google\.com\/drive\/folders\//.test(node.url || '')) out.push(node.url);
     // Rich-text dates carry a timestamp instead of text.
     if (node.type === 'date' && node.timestamp) out.push(node.fallback || formatSlackDate(node.timestamp));
     // Latenode posts use collapsible "container" blocks with a title, subtitle and child_blocks.
@@ -31,7 +32,9 @@ function messageText(m) {
   ]);
   // Blocks usually repeat `text`, so use whichever version carries the most.
   const candidates = [m.text || '', collect(m.blocks, []).join('\n'), attachments.filter(Boolean).join('\n')];
-  const best = candidates.reduce((b, c) => (c.length > b.length ? c : b), '');
+  // Compact cards have a flattened accessibility fallback; their blocks retain the actual fields.
+  const compact = (m.blocks || []).some((b) => /^tpscard\|/.test(b.block_id || ''));
+  const best = compact && candidates[1].trim() ? candidates[1] : candidates.reduce((b, c) => (c.length > b.length ? c : b), '');
   // mrkdwn date tokens: <!date^1792761600^{date_short} at {time}|fallback>
   return best.replace(/<!date\^(\d+)\^[^|>]*(?:\|([^>]*))?>/g, (_, ts, fb) => fb || formatSlackDate(ts));
 }
@@ -50,7 +53,8 @@ function parseIntake(rawText) {
 
   const jobNumber = (nonEmpty[0] || '').match(/^\d{5,7}$/) ? nonEmpty[0] : null;
   const woMatch = text.match(/^\s*(\d{4,7}-\d+)\s*$/m);
-  const workOrder = woMatch ? woMatch[1] : null;
+  const headerWo = nonEmpty[1] || '';
+  const workOrder = /^(?:\d{4,7}-\d+|[A-Z0-9]{6,20})$/.test(headerWo) && /\d/.test(headerWo) && headerWo !== jobNumber ? headerWo : woMatch ? woMatch[1] : null;
 
   const driveMatch = rawText.match(/<(https:\/\/drive\.google\.com\/[^|>]+)\|Work Order Files>/)
     || rawText.match(/(https:\/\/drive\.google\.com\/drive\/folders\/[\w-]+)/);
@@ -69,6 +73,7 @@ function parseIntake(rawText) {
       }
       const hasStreet = above.length && /^\d/.test(above[0]);
       address = [...(hasStreet ? above : above.slice(-1)), lines[i]].join(', ');
+      if (/^units?\s+#?[\w-]+/i.test(lines[i + 1] || '')) address += ', ' + lines[i + 1];
       break;
     }
   }
@@ -90,7 +95,7 @@ function parseIntake(rawText) {
   if (issueMatch) {
     issue = issueMatch[1].trim();
   } else if (addressIdx >= 0) {
-    issue = lines.slice(addressIdx + 1).find((l) => l && l !== 'null' && !/^(unit|suite|united states)/i.test(l)) || null;
+    issue = lines.slice(addressIdx + 1).find((l) => l && l !== 'null' && l !== client && !/^(unit|suite|united states)/i.test(l) && !/\b(?:homeowners association|HOA|apartments|property management)\s*$/i.test(l)) || null;
   }
   if (issue && /^WORK ORDER/i.test(issue)) issue = null;
 
