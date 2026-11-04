@@ -1,6 +1,6 @@
 'use strict';
 const {createHmac,timingSafeEqual}=require('node:crypto');
-const {parseRef,presentJobFiles,FILES_ACTION,openFilesModal}=require('./job-files');
+const {parseRef,presentJobFiles,FILES_ACTION,FILES_VIDEO_TEST_ACTION,openFilesModal}=require('./job-files');
 const desc=require('./desc-modal');
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 function verifySlackRequest(raw,headers,secret,now=Date.now()){
@@ -50,6 +50,7 @@ function registerCallActionsProxy(receiver,options={}){
    if(!(options.key||process.env.TPS_INTERNAL_KEY)){res.status(503).send('Call controls are not connected.');return;}
    const payload=JSON.parse(new URLSearchParams(raw).get('payload'));
    // Files button on a TPS Bot card: open the files pop-up here, without a Latenode run.
+   if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===FILES_VIDEO_TEST_ACTION){res.status(200).send('');if((payload.channel?.id||payload.container?.channel_id)==='C0C2ZVB32RG')console.log('job files video test',await openFilesModal(payload,{...options,inlineVideo:true}).catch(e=>e.message));return;}
    if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===FILES_ACTION){res.status(200).send('');console.log('job files modal',await openFilesModal(payload,options).catch(e=>e.message));return;}
    // Open the local media tool; submission uses the existing Complete route.
    if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===desc.OPEN_ACTION){res.status(200).send('');console.log('desc modal',await desc.openDescModal(payload,options).catch(e=>e.message));return;}

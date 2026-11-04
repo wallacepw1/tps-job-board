@@ -49,7 +49,7 @@ function entity(jobNumber,folderId,previewUrl){
  return{url:folderUrl(folderId),external_ref:{id:refId(jobNumber,folderId),type:REF_TYPE},entity_type:ENTITY_TYPE,
   entity_payload:{attributes:{title:{text:`Job files · ${jobNumber}`},product_name:'TPS Job Files',full_size_preview:preview},fields:{}}};
 }
-const FILES_ACTION='tps_job_files_open';
+const FILES_ACTION='tps_job_files_open',FILES_VIDEO_TEST_ACTION='tps_job_files_video_test';
 function filesButton(jobNumber,folderId){return{type:'button',action_id:FILES_ACTION,text:{type:'plain_text',text:'Files'},value:`${jobNumber}:${folderId}`};}
 function cardMessage(channel,jobNumber,folderId){
  const text=`📁 Job files · ${jobNumber}: work order, photos and videos in Drive.`;
@@ -78,7 +78,10 @@ function filesModal({jobNumber,folderId,files},o={},now=Date.now()){
   const k=kindOf(f);
   if(k==='photo')blocks.push({type:'image',image_url:thumb(f,1000),alt_text:f.name.slice(0,200),title:plain(f.name)});
   else if(k==='pdf'){blocks.push({type:'divider'},{type:'section',text:{type:'mrkdwn',text:`:page_facing_up: *${f.name.replace(/[*_~`<>&]/g,'')}*`},accessory:{type:'button',action_id:`tps_job_files_pdf_${f.id}`.slice(0,255),text:plain('View PDF'),url:viewer(f)}},{type:'image',image_url:thumb(f,1000),alt_text:`First page of ${f.name}`.slice(0,200)});}
-  else blocks.push({type:'section',text:{type:'mrkdwn',text:`${k==='video'?':movie_camera:':':paperclip:'} ${f.name.replace(/[*_~`<>&]/g,'')}`},accessory:{type:'button',action_id:`tps_job_files_open_${f.id}`.slice(0,255),text:plain(k==='video'?'Play':'Open'),url:viewLink(f)}});
+  else {
+   if(k==='video'&&o.inlineVideo)blocks.push({type:'video',title:plain(f.name),title_url:viewLink(f),video_url:`https://drive.google.com/file/d/${encodeURIComponent(f.id)}/preview`,alt_text:`Video: ${f.name}`.slice(0,200),thumbnail_url:thumb(f,1000)});
+   blocks.push({type:'section',text:{type:'mrkdwn',text:`${k==='video'?':movie_camera:':':paperclip:'} ${f.name.replace(/[*_~`<>&]/g,'')}`},accessory:{type:'button',action_id:`tps_job_files_open_${f.id}`.slice(0,255),text:plain(k==='video'?'Play':'Open'),url:viewLink(f)}});
+  }
  }
  if(sorted.length>MODAL_MAX)blocks.push({type:'context',elements:[{type:'mrkdwn',text:`Showing ${MODAL_MAX} of ${sorted.length}. Open in Drive for the rest.`}]});
  if(!sorted.length)blocks.push({type:'section',text:{type:'mrkdwn',text:'Nothing in this job folder yet.'}});
@@ -90,10 +93,17 @@ async function openFilesModal(payload,o={}){
  const token=env(o,'TPS_BOT_TOKEN');if(!token)return'TPS_BOT_TOKEN is not set';
  const fetcher=o.fetch||global.fetch;
  const opened=await slackApi('views.open',{trigger_id:payload.trigger_id,view:loadingModal(ref.jobNumber)},token,fetcher);
- let view;
- try{view=filesModal({...ref,files:await listFolder(ref.folderId,o)},o);}
+ let view,files;
+ try{files=await listFolder(ref.folderId,o);view=filesModal({...ref,files},o);}
  catch(e){view={...loadingModal(ref.jobNumber),blocks:[{type:'section',text:{type:'mrkdwn',text:`Couldn't read the Drive folder right now. <${folderUrl(ref.folderId)}|Open it in Drive>`}}]};}
- await slackApi('views.update',{view_id:opened.view.id,view},token,fetcher);
+ try{await slackApi('views.update',{view_id:opened.view.id,view},token,fetcher);}
+ catch(e){
+  if(!o.inlineVideo||!files)throw e;
+  const fallback=filesModal({...ref,files},{...o,inlineVideo:false});
+  fallback.blocks.unshift({type:'section',text:{type:'plain_text',text:'Slack could not load the inline video test. The Play links below still open the videos.'}});
+  fallback.blocks=fallback.blocks.slice(0,100);
+  await slackApi('views.update',{view_id:opened.view.id,view:fallback},token,fetcher);
+ }
  return'opened';
 }
 
@@ -195,7 +205,7 @@ function errorHtml(msg){return`<!doctype html><meta charset="utf-8"><meta name="
 // ---- HTTP routes ----
 function registerJobFilesGallery(receiver,o={}){
  const frame=res=>res.set('Content-Security-Policy',FRAME_ANCESTORS).set('Cache-Control','private, max-age=60');
- receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET')}));
+ receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET'),videoTest:1}));
  receiver.router.get('/job-files/:folder',async(req,res)=>{
   frame(res);
   const {folder}=req.params,{job,exp,sig}=req.query;
@@ -269,4 +279,4 @@ async function postJobFilesCard({channel,jobNumber,filesUrl},o={}){
  return slackApi('chat.postMessage',cardMessage(channel,jobNumber,folderId),token,o.fetch||global.fetch);
 }
 
-module.exports={slackApi,kindOf,baseUrl,folderUrl,viewLink,MODAL_IMG_TTL,MODAL_LINK_TTL,FILES_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
+module.exports={slackApi,kindOf,baseUrl,folderUrl,viewLink,MODAL_IMG_TTL,MODAL_LINK_TTL,FILES_ACTION,FILES_VIDEO_TEST_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
