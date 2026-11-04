@@ -52,7 +52,7 @@ async function slackFiles(incoming,o){
  for(let i=0;i<5;i++){
   const j=await jf.slackApi('conversations.replies',{channel:incoming.channel,ts:incoming.ts,limit:200,...(cursor?{cursor}:{})},token,o.fetch||global.fetch);
   messages.push(...j.messages||[]);
-  for(const m of j.messages||[])for(const f of m.files||[])if(f.id&&f.mode!=='tombstone')out.push({src:'slack',id:f.id,name:f.name||f.title||'file',mimeType:f.mimetype||'',permalink:f.permalink,created:String(f.created||m.ts)});
+  for(const m of j.messages||[])for(const f of m.files||[])if(f.id&&f.mode!=='tombstone')out.push({src:'slack',id:f.id,name:f.name||f.title||'file',mimeType:f.mimetype||'',size:Number(f.size)||0,permalink:f.permalink,created:String(f.created||m.ts)});
   cursor=j.response_metadata?.next_cursor;if(!cursor)break;
  }
  return{files:out,notes:collectWorkNotes(messages)};
@@ -64,7 +64,12 @@ async function driveFiles(folderId,o){
 async function gatherFiles(refs,o){
  const [d,s]=await Promise.all([driveFiles(refs.folderId,o).catch(e=>(console.warn('desc modal drive',e.message),[])),slackFiles(refs.incoming,o).catch(e=>(console.warn('desc modal slack',e.message),{files:[],notes:''}))]);
  const seen=new Set(),files=[];
- for(const f of[...d,...s.files]){const k=`${jf.kindOf(f)}|${String(f.name).toLowerCase()}`;if(seen.has(k))continue;seen.add(k);files.push(f);}
+ // Drive first, so a file that is in both places links to its Drive copy. The Slack copy often has another name,
+ // so it is matched by kind + byte size as well as by name.
+ for(const f of[...d,...s.files]){
+  const kind=jf.kindOf(f),keys=[`${kind}|${String(f.name).toLowerCase()}`];if(Number(f.size)>0)keys.push(`${kind}|#${Number(f.size)}`);
+  if(keys.some(k=>seen.has(k)))continue;keys.forEach(k=>seen.add(k));files.push(f);
+ }
  return{files,notes:s.notes};
 }
 
