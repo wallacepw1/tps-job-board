@@ -33,7 +33,7 @@ function assignmentModal(job,operation,actor,key,now=Date.now()){
  const options=TECHS.filter(t=>t.id!==job.techId&&t.id!==job.helperId).map(t=>({text:{type:'plain_text',text:t.name},value:t.id}));
  return{type:'modal',callback_id:'job_assignment',private_metadata:encodeDraft(draft,key,now),
  title:{type:'plain_text',text:LABELS[operation]},submit:{type:'plain_text',text:operation==='assign'?'Confirm assignment':'Confirm'},close:{type:'plain_text',text:'Cancel'},
- blocks:[{type:'section',text:{type:'mrkdwn',text:['*'+job.jobNumber+'*',job.location||'',job.issue||'',job.tech?'Lead: '+job.tech:'No lead assigned.',operation==='helper_add'?'The lead remains responsible. This is the same call and invoice.':'The existing call history and appointment are retained.'].filter(Boolean).join('\n').slice(0,2900)}},
+ blocks:[{type:'section',text:{type:'mrkdwn',text:['*'+job.jobNumber+'*',job.location||'',job.issue||'',job.tech?'Lead: '+job.tech:'No lead assigned.',operation==='helper_add'?'The lead remains responsible. This is the same call and invoice.':operation==='assign'?'Assigning a Future call moves its appointment to today at the current Pacific time.':'The existing call history and appointment are retained.'].filter(Boolean).join('\n').slice(0,2900)}},
  ...(operation==='helper_remove'?[{type:'section',text:{type:'mrkdwn',text:'Remove the helper after their photos and comments are safely recorded.'}}]:[{type:'input',block_id:'assignment_target',label:{type:'plain_text',text:operation==='helper_add'?'Helper':'Plumber'},element:{type:'static_select',action_id:'target',options,placeholder:{type:'plain_text',text:'Choose a plumber'}}}])]};
 }
 function assignmentResumeModal(request,actor,key,now=Date.now()){
