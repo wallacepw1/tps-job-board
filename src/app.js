@@ -10,6 +10,7 @@ const { registerHelperEvents } = require('./helper-events');
 const { registerRundownRefresh } = require('./rundown-refresh');
 const { summaryHome, registerSummarySurface } = require('./jobs-summary-surface');
 const {TECHS}=require('./assignment-policy');
+const {boardRole,canViewJob,canAddNotes,scopedFilters}=require('./board-scope');
 
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
@@ -17,7 +18,7 @@ const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_
 registerCallActionsProxy(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
-receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:3}));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:4}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
@@ -27,7 +28,7 @@ const homeViewers=new Map();
 
 // Techs open on their own jobs; everyone else on Today.
 function filtersFor(user) {
-  return {...(userFilters.get(user)||{tab:store.isTech(user)?'mine':'today',tech:'all'}),user};
+  return scopedFilters({...((userFilters.get(user))||{tab:boardRole(user)==='plumber'?'mine':'today',tech:'all'}),user});
 }
 
 let refreshing = null;
@@ -106,7 +107,7 @@ app.view('job_find', async ({ ack, body, view }) => {
   }
   // Slack needs an answer within 3 seconds, so search the board as it stands.
   const job = store.find(number);
-  if (!job) {
+  if (!canViewJob(job,body.user.id)) {
     await ack({ response_action: 'errors', errors: { job: `I couldn't find ${number} in the last few weeks of #incoming-calls or the TPS Jobs calendar.` } });
     return;
   }
@@ -116,7 +117,7 @@ app.view('job_find', async ({ ack, body, view }) => {
 app.action(/^addnote_/, async ({ ack, body, action, client }) => {
   await ack();
   const job = store.find(action.value);
-  const view = job?.assignedMessageUrl
+  const view = canAddNotes(job,body.user.id,job?.assignedMessageUrl)
     ? noteModal(job)
     : messageModal('Add photos/notes', `Job ${action.value} isn't assigned to a tech channel yet, so there's no thread to send to.`);
   if (body.view?.type === 'modal') await client.views.push({ trigger_id: body.trigger_id, view });
@@ -125,6 +126,7 @@ app.action(/^addnote_/, async ({ ack, body, action, client }) => {
 
 app.view('job_note', async ({ ack, body, view, client }) => {
   const { jobNumber, url } = JSON.parse(view.private_metadata);
+  if(!canAddNotes(store.find(jobNumber),body.user.id,url)){await ack({response_action:'update',view:messageModal('Add photos/notes','This call is no longer assigned to you or its thread changed. Refresh the board before adding notes.')});return;}
   const files = view.state.values.photos?.files?.files || [];
   const notes = (view.state.values.notes?.text?.value || '').trim();
   if (!files.length && !notes) {
@@ -185,7 +187,7 @@ app.command('/jobs', async ({ ack, command, client }) => {
   }
   if (/^\d{5,7}$/.test(arg)) {
     const job = store.find(arg);
-    if (job) {
+    if (canViewJob(job,command.user_id)) {
       await client.views.open({ trigger_id: command.trigger_id, view: jobModal(job, command.user_id) });
     } else {
       await client.chat.postEphemeral({ channel: command.channel_id, user: command.user_id, text: `I couldn't find job ${arg} in the last few weeks of #incoming-calls or the TPS Jobs calendar.` });
