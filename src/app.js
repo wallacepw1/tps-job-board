@@ -6,6 +6,7 @@ const { homeView, modalView, jobModal, noteModal, messageModal, findModal, TABS 
 const { registerAssignmentHandlers } = require('./assignment');
 const { registerCallActionsProxy } = require('./call-actions-proxy');
 const { registerAssistantEventsProxy } = require('./assistant-events-proxy');
+const { registerJobFilesGallery, postJobFilesCard } = require('./job-files');
 const { registerHelperEvents } = require('./helper-events');
 const { registerRundownRefresh } = require('./rundown-refresh');
 const { summaryHome, registerSummarySurface } = require('./jobs-summary-surface');
@@ -15,7 +16,9 @@ const {boardRole,canViewJob,canAddNotes,scopedFilters}=require('./board-scope');
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
 
 const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_SECRET });
-registerCallActionsProxy(receiver);
+// The store is created below; the job files panel only reads it when a card is clicked.
+registerCallActionsProxy(receiver, { get store() { return store; } });
+registerJobFilesGallery(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
 receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:4}));
@@ -192,6 +195,20 @@ app.command('/jobs', async ({ ack, command, client }) => {
     } else {
       await client.chat.postEphemeral({ channel: command.channel_id, user: command.user_id, text: `I couldn't find job ${arg} in the last few weeks of #incoming-calls or the TPS Jobs calendar.` });
     }
+    return;
+  }
+  // "/jobs files 132263": TPS Bot posts the job's files card here; clicking it opens the side panel.
+  const filesArg = arg.match(/^files?\s+(\d{5,7})$/i);
+  if (filesArg) {
+    const job = store.find(filesArg[1]);
+    let text;
+    if (!canViewJob(job, command.user_id)) text = `I couldn't find job ${filesArg[1]} in the last few weeks of #incoming-calls or the TPS Jobs calendar.`;
+    else if (!job.filesUrl) text = `Job ${filesArg[1]} has no Drive folder link yet.`;
+    else {
+      try { await postJobFilesCard({ channel: command.channel_id, jobNumber: job.jobNumber, filesUrl: job.filesUrl }); return; }
+      catch (e) { text = /not_in_channel|channel_not_found/.test(e.message) ? 'Invite TPS Bot to this channel first, then try again.' : `Couldn't post the files card (${e.message}).`; }
+    }
+    await client.chat.postEphemeral({ channel: command.channel_id, user: command.user_id, text });
     return;
   }
   const techArg = store.techs().find((t) => t.toLowerCase() === arg.toLowerCase());
