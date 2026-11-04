@@ -23,6 +23,7 @@ const validJob=n=>/^\d{5,7}$/.test(n||'');
 function refId(jobNumber,folderId){return`job-files:${jobNumber}:${folderId}`;}
 function parseRef(id){
  const s=String(id||'');
+ let test=s.match(/^job-files-video-test:(\d{5,7}):([\w-]{10,100})$/);if(test)return{jobNumber:test[1],folderId:test[2],inlineVideo:true};
  let m=s.match(/^job-files:(\d{5,7}):([\w-]{10,100})$/);if(m)return{jobNumber:m[1],folderId:m[2]};
  m=s.match(/^tps-job-files-(?:test-)?(\d{5,7})$/);if(m)return{jobNumber:m[1],folderId:null};
  return null;
@@ -159,7 +160,7 @@ function galleryHtml({jobNumber,folderId,files,query}){
  const thumb=f=>`/job-files/${folderId}/thumb/${encodeURIComponent(f.id)}?${query}`;
  const tile=f=>{const k=kindOf(f),badge={video:'▶ Video',pdf:'PDF',file:'File',folder:'Folder'}[k]||'';
   const img=(f.thumbnailLink||k==='photo'||k==='video'||k==='pdf')?`<img loading="lazy" src="${esc(thumb(f))}" alt="" onerror="this.remove()">`:'';
-  const inPanel=k==='photo'||k==='pdf';
+  const inPanel=k==='photo'||k==='pdf'||k==='video'&&new URLSearchParams(query).get('video')==='1';
   const href=inPanel?`/job-files/${folderId}/view/${encodeURIComponent(f.id)}?${query}`:viewLink(f);
   return`<a class="tile ${k}" href="${esc(href)}"${inPanel?'':' target="_blank" rel="noopener"'}><div class="pic">${img}${badge?`<span class="badge">${badge}</span>`:''}</div><div class="name">${esc(f.name)}</div></a>`;};
  return`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Job files ${esc(jobNumber)}</title>
@@ -176,7 +177,9 @@ const MAX_RAW=40*1024*1024;
 // available inside Slack's sandboxed frame), from this app's /raw proxy of the Drive file.
 function viewerHtml({jobNumber,folderId,file,query}){
  const back=`/job-files/${folderId}?${query}`,raw=`/job-files/${folderId}/raw/${encodeURIComponent(file.id)}?${query}`,k=kindOf(file);
- const body=k==='pdf'
+ const body=k==='video'
+  ?`<iframe title="${esc(file.name)}" src="https://drive.google.com/file/d/${encodeURIComponent(file.id)}/preview" allow="autoplay; fullscreen; encrypted-media" allowfullscreen referrerpolicy="no-referrer" style="width:100%;aspect-ratio:16/9;min-height:240px;border:0"></iframe><p class="muted">If the player cannot load, use Open in Drive above.</p>`
+  :k==='pdf'
   ?`<div id="pages" class="muted">Loading PDF…</div>
 <script src="${PDFJS}/pdf.min.js"></script>
 <script>
@@ -205,24 +208,24 @@ function errorHtml(msg){return`<!doctype html><meta charset="utf-8"><meta name="
 // ---- HTTP routes ----
 function registerJobFilesGallery(receiver,o={}){
  const frame=res=>res.set('Content-Security-Policy',FRAME_ANCESTORS).set('Cache-Control','private, max-age=60');
- receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET'),videoTest:1}));
+ receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET'),videoTest:2}));
  receiver.router.get('/job-files/:folder',async(req,res)=>{
   frame(res);
   const {folder}=req.params,{job,exp,sig}=req.query;
   if(!verify(folder,job,exp,sig,o))return res.status(403).type('html').send(errorHtml('This link has expired. Close the panel and click the job files card again.'));
-  try{const files=await listFolder(folder,o);res.type('html').send(galleryHtml({jobNumber:job,folderId:folder,files,query:new URLSearchParams({job,exp,sig}).toString()}));}
+  try{const files=await listFolder(folder,o);res.type('html').send(galleryHtml({jobNumber:job,folderId:folder,files,query:new URLSearchParams({job,exp,sig,...(req.query.video==='1'?{video:'1'}:{})}).toString()}));}
   catch(e){console.error('job files list failed',folder,e.message);res.status(502).type('html').send(errorHtml(`Couldn't read the Drive folder right now. Open it in Drive instead: ${folderUrl(folder)}`));}
  });
  const fileOf=async(req,res)=>{
   const {folder,file}=req.params,{job,exp,sig}=req.query;
   if(!verify(folder,job,exp,sig,o)||!/^[\w-]{10,100}$/.test(file)){res.status(403).end();return null;}
   const f=(await listFolder(folder,o)).find(x=>x.id===file);if(!f){res.status(404).end();return null;}
-  return{f,folder,job,query:new URLSearchParams({job,exp,sig}).toString()};
+  return{f,folder,job,query:new URLSearchParams({job,exp,sig,...(req.query.video==='1'?{video:'1'}:{})}).toString()};
  };
  receiver.router.get('/job-files/:folder/view/:file',async(req,res)=>{
   frame(res);
   try{const x=await fileOf(req,res);if(!x)return;
-   if(!['photo','pdf'].includes(kindOf(x.f)))return res.redirect(viewLink(x.f));
+   if(!['photo','pdf'].includes(kindOf(x.f))&&!(kindOf(x.f)==='video'&&req.query.video==='1'))return res.redirect(viewLink(x.f));
    res.type('html').send(viewerHtml({jobNumber:x.job,folderId:x.folder,file:x.f,query:x.query}));
   }catch{if(!res.headersSent)res.status(502).type('html').send(errorHtml("Couldn't read the Drive folder right now."));}
  });
@@ -267,7 +270,7 @@ async function presentJobFiles(event,{store,...o}={}){
   await slackApi('entity.presentDetails',{trigger_id:event.trigger_id,error:{status:'not_found',custom_message:`No Drive folder found for job ${ref.jobNumber}.`}},token,fetcher).catch(()=>{});
   return'no folder';
  }
- const meta=entity(ref.jobNumber,folderId,galleryUrl(folderId,ref.jobNumber,o));
+ const meta=entity(ref.jobNumber,folderId,galleryUrl(folderId,ref.jobNumber,o)+(ref.inlineVideo?'&video=1':''));
  meta.external_ref.id=event.external_ref.id; // answer for the card that was clicked
  await slackApi('entity.presentDetails',{trigger_id:event.trigger_id,metadata:meta},token,fetcher);
  return'presented';
