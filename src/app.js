@@ -24,7 +24,7 @@ registerCallActionsProxy(receiver, { get store() { return store; } });
 registerJobFilesGallery(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
-receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:7}));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:8}));
 receiver.router.get('/phone/health', (_req, res) => res.json({phonecom:!!process.env.PHONECOM_API_TOKEN,calendar:!!process.env.ONCALL_CALENDAR_ICS_URL,assistant:!!process.env.TPS_ASSISTANT_SIGNING_SECRET,popup:!!process.env.TPS_ASSISTANT_BOT_TOKEN,sync:onCallSync?.status()||null,version:3}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
@@ -81,7 +81,7 @@ app.event('app_home_opened', async ({ event, client }) => {
 for (const tab of TABS) {
   app.action(`tab_${tab.id}`, async ({ ack, body, client }) => {
     await ack();
-    userFilters.set(body.user.id, { ...filtersFor(body.user.id), tab: tab.id });
+    userFilters.set(body.user.id, { ...filtersFor(body.user.id), tab: tab.id, page:0, ...(tab.id==='unclosed'?{tech:'all'}:{}) });
     await ready();
     await rerender(body, client);
   });
@@ -89,7 +89,7 @@ for (const tab of TABS) {
 
 app.action('tech_filter', async ({ ack, body, action, client }) => {
   await ack();
-  userFilters.set(body.user.id, { ...filtersFor(body.user.id), tech: action.selected_option.value });
+  userFilters.set(body.user.id, { ...filtersFor(body.user.id), tech: action.selected_option.value, page:0 });
   await rerender(body, client);
 });
 
@@ -98,6 +98,13 @@ app.action('refresh', async ({ ack, body, client }) => {
   store.invalidateLeadActivity();
   await refresh();
   await rerender(body, client);
+});
+
+app.action(/^unclosed_page_(prev|next)$/,async({ack,body,action,client})=>{
+ await ack();if(boardRole(body.user.id)!=='admin')return;
+ const page=Number(action.value);if(!Number.isSafeInteger(page)||page<0)return;
+ userFilters.set(body.user.id,{...filtersFor(body.user.id),tab:'unclosed',page});
+ await ready();await rerender(body,client);
 });
 
 app.action('find_job', async ({ ack, body, client }) => {
