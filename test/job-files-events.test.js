@@ -36,3 +36,15 @@ test('old test card finds its folder from the board',async()=>{
  await routes['/slack/job-files-events']({rawBody:Buffer.from(r.raw),headers:r.headers},{status(){return this;},type(){return this;},send(){this.headersSent=true;return this;}});
  assert.equal(calls[0].metadata.external_ref.id,'tps-job-files-test-132263');assert.match(calls[0].metadata.entity_payload.attributes.full_size_preview.preview_url,/job=132263/);
 });
+test('Files button clicks on TPS Bot cards are handled on Render and never relayed to Call Route',async()=>{
+ const {registerCallActionsProxy}=require('../src/call-actions-proxy');
+ const routes={},receiver={router:{get:(p,h)=>routes[p]=h,post:(p,h)=>routes[p]=h}},urls=[];
+ const fetch=async(url,init)=>{urls.push(url);if(url.startsWith('https://slack.com/api/'))return{ok:true,json:async()=>({ok:true,view:{id:'V1'}})};return{ok:true,json:async()=>({files:[]}),text:async()=>''};};
+ registerCallActionsProxy(receiver,{secret,key:'k',fetch,TPS_BOT_TOKEN:'x',TPS_INTERNAL_KEY:'k',GOOGLE_API_KEY:'g'});
+ const payload={type:'block_actions',trigger_id:'T1',actions:[{action_id:'tps_job_files_open',value:`132198:${FOLDER}`}]};
+ const raw=new URLSearchParams({payload:JSON.stringify(payload)}).toString(),ts=String(Math.floor(Date.now()/1000));
+ const headers={'x-slack-request-timestamp':ts,'x-slack-signature':'v0='+createHmac('sha256',secret).update('v0:'+ts+':'+raw).digest('hex')};
+ const res={status(n){this.code=n;return this;},send(){this.headersSent=true;return this;},type(){return this;}};
+ await routes['/slack/call-actions']({rawBody:Buffer.from(raw),headers},res);
+ assert.equal(res.code,200);assert.ok(urls.includes('https://slack.com/api/views.open'));assert.ok(!urls.some(u=>u.includes('latenode')));
+});
