@@ -1,7 +1,7 @@
 'use strict';
 // Shared Phone.com API v4 client. One place for the token, the account lookup and rate limits,
 // so the phone settings tool now and the texting tools later use the same connection.
-// This version only reads: write methods are added with the calendar switching, behind their own check.
+// Reads by default. patch() is used only by the on-call sync in live mode (PHONECOM_SYNC_MODE=live).
 const BASE = 'https://api.phone.com/v4';
 
 class PhoneComError extends Error {
@@ -11,12 +11,13 @@ class PhoneComError extends Error {
 function createPhoneCom({ token = process.env.PHONECOM_API_TOKEN, fetch: fetcher = global.fetch, base = BASE, sleep = ms => new Promise(r => setTimeout(r, ms)), timeoutMs = 15000 } = {}) {
   let voipId = process.env.PHONECOM_ACCOUNT_ID || null;
 
-  async function request(path, query = {}) {
+  async function request(path, query = {}, { method = 'GET', body } = {}) {
     if (!token) throw new PhoneComError('Phone.com is not connected yet (PHONECOM_API_TOKEN is not set on Render).', 0);
     const url = new URL(base + path);
     for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     for (let attempt = 0; ; attempt++) {
-      const res = await fetcher(url.toString(), { method: 'GET', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
+      const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) };
+      const res = await fetcher(url.toString(), { method, headers, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeoutMs) });
       // Phone.com allows 30 calls per endpoint every 30s; wait once when it says so.
       if (res.status === 429 && attempt === 0) {
         const wait = Math.min(Number(res.headers?.get?.('retry-after')) || 5, 20);
@@ -58,7 +59,12 @@ function createPhoneCom({ token = process.env.PHONECOM_API_TOKEN, fetch: fetcher
     return request(`/accounts/${id}/${resource}/${encodeURIComponent(itemId)}`, query);
   }
 
-  return { ready: !!token, accountId, list, get, request };
+  async function patch(resource, itemId, body) {
+    const id = await accountId();
+    return request(`/accounts/${id}/${resource}/${encodeURIComponent(itemId)}`, {}, { method: 'PATCH', body });
+  }
+
+  return { ready: !!token, accountId, list, get, patch, request };
 }
 
 module.exports = { createPhoneCom, PhoneComError, BASE };

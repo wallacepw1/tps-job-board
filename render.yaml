@@ -35,5 +35,7 @@ services:
         sync: false
       - key: TPS_ASSISTANT_BOT_TOKEN
         sync: false
+      - key: PHONECOM_SYNC_MODE
+        value: report
       - key: PUBLIC_URL
         value: https://tps-job-board.onrender.com
