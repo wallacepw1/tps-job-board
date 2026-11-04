@@ -8,6 +8,7 @@ const { registerCallActionsProxy } = require('./call-actions-proxy');
 const { registerAssistantEventsProxy } = require('./assistant-events-proxy');
 const { registerHelperEvents } = require('./helper-events');
 const { registerRundownRefresh } = require('./rundown-refresh');
+const { summaryHome, registerSummarySurface } = require('./jobs-summary-surface');
 const {TECHS}=require('./assignment-policy');
 
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
@@ -16,6 +17,7 @@ const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_
 registerCallActionsProxy(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:1}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
@@ -42,7 +44,7 @@ async function ready() {
 }
 
 async function publishHome(client, user) {
-  await client.views.publish({ user_id: user, view: homeView(store, filtersFor(user)) });
+  await client.views.publish({ user_id: user, view: summaryHome(homeView(store, filtersFor(user)), user) });
 }
 
 // Re-render wherever the click came from: the Home tab or the /jobs modal.
@@ -58,6 +60,7 @@ async function rerender(body, client) {
 registerAssignmentHandlers(app, { store, refresh, publishHome, messageModal });
 registerHelperEvents(app);
 registerRundownRefresh(app);
+registerSummarySurface(app);
 
 app.event('app_home_opened', async ({ event, client }) => {
   if (event.tab !== 'home') return;
