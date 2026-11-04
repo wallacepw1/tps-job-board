@@ -26,6 +26,7 @@ function indexWorkflow(sources){
 function applyWorkflow(job,card){
  const message=card.message,ids=cardIdentity(message),text=messageText(message);
  const next={...job,recordId:job.recordId||ids.recordId,threadTs:job.threadTs||ids.incomingTs,workflowChannel:card.channel,workflowTs:message.ts};
+ if(['price','closing'].includes(card.role))return{...next,workflowStage:card.role,completed:true,reopened:false,completedAt:job.completedAt||new Date(Number(message.ts)*1000),workflowMessageUrl:messageUrl(card.channel,message.ts),assignedMessageUrl:null};
  if(card.role==='completed')return{...next,workflowStage:'done',completed:true,reopened:false,completedAt:new Date(Number(message.ts)*1000),completedMessageUrl:messageUrl(card.channel,message.ts),assignedMessageUrl:null};
  // A leftover older source card must not reopen a completion already recorded in Incoming.
  if(job.completedAt&&Number(message.ts)*1000<=new Date(job.completedAt).getTime())return next;

@@ -51,12 +51,14 @@ function registerCallActionsProxy(receiver,options={}){
    const payload=JSON.parse(new URLSearchParams(raw).get('payload'));
    // Files button on a TPS Bot card: open the files pop-up here, without a Latenode run.
    if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===FILES_ACTION){res.status(200).send('');console.log('job files modal',await openFilesModal(payload,options).catch(e=>e.message));return;}
-   // Write description pop-up on #completed cards: opened and saved here, without a Latenode run.
+   // Open the local media tool; submission uses the existing Complete route.
    if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===desc.OPEN_ACTION){res.status(200).send('');console.log('desc modal',await desc.openDescModal(payload,options).catch(e=>e.message));return;}
    if(payload.type==='block_actions'&&/^tps_desc_/.test(payload.actions?.[0]?.action_id||'')){res.status(200).send('');return;}
    if(payload.type==='view_submission'&&payload.view?.callback_id===desc.CALLBACK){
-    const body=await Promise.race([desc.saveDescription(payload,options),new Promise(r=>setTimeout(()=>r({response_action:'errors',errors:{notes_input_block:'Slack is slow right now. Try Save again.'}}),2700))]).catch(()=>({response_action:'errors',errors:{notes_input_block:"Couldn't save to the card. Try Save again."}}));
-    if(body)res.status(200).type('application/json').send(JSON.stringify(body));else res.status(200).send('');
+    const error=desc.submissionError(payload);
+    if(error){res.status(200).json({response_action:'errors',errors:{notes_input_block:error}});return;}
+    res.status(200).json({response_action:'update',view:desc.resultView('', 'Submitting the description… Please do not submit again.')});
+    desc.finishSubmission(payload,options).catch(e=>console.error('description submit failed',e.message));
     return;
    }
    // Link buttons inside the files pop-up need only an acknowledgement.

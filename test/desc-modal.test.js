@@ -26,9 +26,9 @@ test('pop-up: notes, description box, then PDFs and photos; Slack photos by file
   {src:'slack',id:'F1',name:'IMG_1.jpg',mimeType:'image/jpeg',created:'2'},
   {src:'slack',id:'F2',name:'clip.mp4',mimeType:'video/mp4',permalink:'https://tpsplumbing.slack.com/files/U/F2/clip.mp4',created:'3'},
   {src:'drive',id:'pdf1aaaaaaaaaa',name:'261269-1.pdf',mimeType:'application/pdf',created:'1'}]},o);
- assert.equal(v.callback_id,d.CALLBACK);assert.equal(v.submit.text,'Save to card');
+ assert.equal(v.callback_id,d.CALLBACK);assert.equal(v.submit.text,'Submit description');
  assert.ok(v.blocks[0].text.text.includes('leak b')&&!v.blocks[0].text.text.includes('<b>'));
- const input=v.blocks[1];assert.equal(input.block_id,'notes_input_block');assert.equal(input.element.initial_value,'AI draft');assert.equal(input.hint.text,'Draft hint');
+ const input=v.blocks[1];assert.equal(input.block_id,'notes_input_block');assert.equal(input.element.initial_value,'AI draft');assert.match(input.hint.text,/pricing/);
  const types=v.blocks.slice(2).map(b=>b.type);
  assert.deepEqual(types,['divider','context','section','image','image','section']);
  assert.ok(v.blocks[5].image_url.startsWith(`https://board.example/job-files/${FOLDER}/thumb/pdf1aaaaaaaaaa?`),'PDF first page');
@@ -58,42 +58,11 @@ function fakeSlack(handlers){
 test('openDescModal opens on the trigger, then fills from Drive and the Incoming Calls thread (no duplicates)',async()=>{
  jf._listCache.clear();
  const s=fakeSlack({'views.open':()=>({ok:true,view:{id:'V1',hash:'h'}}),'conversations.replies':()=>({ok:true,messages:[{ts:'1',files:[{id:'F1',name:'IMG_1.jpg',mimetype:'image/jpeg'},{id:'F3',name:'IMG_3.jpg',mimetype:'image/jpeg'}]}]})});
- const r=await d.openDescModal({trigger_id:'T1',channel:{id:'C0COMPLETED'},message:{ts:'1793741271.447669',blocks:card()},actions:[{action_id:'tps_desc_open'}]},{...o,fetch:s.fetch});
+ const r=await d.openDescModal({trigger_id:'T1',user:{id:'U0876C3TEGL'},channel:{id:'C0COMPLETED'},message:{ts:'1793741271.447669',blocks:card()},actions:[{action_id:'tps_desc_open'}]},{...o,fetch:s.fetch});
  assert.equal(r,'opened 132273 files=3');
  assert.deepEqual(s.calls.map(c=>c.m),['views.open','conversations.replies','views.update']);
  assert.equal(s.calls[1].b.channel,'C0INCOMING');
  const view=s.calls[2].b.view;
  assert.equal(view.blocks[1].element.initial_value,'AI draft');
  assert.equal(view.blocks.filter(b=>b.type==='image').length,3,'PDF page + 2 photos');
-});
-
-test('Save writes the text into the card box and keeps every other block',async()=>{
- const s=fakeSlack({'conversations.history':()=>({ok:true,messages:[{ts:'1793741271.447669',text:'132273',blocks:card()}]}),'chat.update':()=>({ok:true})});
- const out=await d.saveDescription({view:{private_metadata:JSON.stringify({c:'C0COMPLETED',ts:'1793741271.447669',j:'132273'}),state:{values:{notes_input_block:{notes_input_action:{value:'  The plumber fixed the leak.  '}}}}}},{...o,fetch:s.fetch});
- assert.equal(out,null);
- const up=s.calls.find(c=>c.m==='chat.update').b;
- assert.equal(up.channel,'C0COMPLETED');assert.equal(up.text,'132273');
- assert.equal(up.blocks.length,card().length);
- assert.equal(up.blocks.find(b=>b.block_id==='notes_input_block').element.initial_value,'The plumber fixed the leak.');
- assert.deepEqual(up.blocks[0],card()[0]);
-});
-
-test('Save refuses a completed card, an empty box, and reports a failed update in the pop-up',async()=>{
- const meta=JSON.stringify({c:'C0COMPLETED',ts:'1793741271.447669'});
- const val=v=>({notes_input_block:{notes_input_action:{value:v}}});
- let s=fakeSlack({'conversations.history':()=>({ok:true,messages:[{ts:'1793741271.447669',blocks:card().filter(b=>b.type!=='input')}]})});
- let out=await d.saveDescription({view:{private_metadata:meta,state:{values:val('x')}}},{...o,fetch:s.fetch});
- assert.match(out.errors.notes_input_block,/already completed/);assert.ok(!s.calls.some(c=>c.m==='chat.update'));
- out=await d.saveDescription({view:{private_metadata:meta,state:{values:val('  ')}}},{...o,fetch:s.fetch});
- assert.match(out.errors.notes_input_block,/Write the description/);
- s=fakeSlack({'conversations.history':()=>({ok:true,messages:[{ts:'1793741271.447669',blocks:card()}]}),'chat.update':()=>({ok:false,error:'cant_update_message'})});
- out=await d.saveDescription({view:{private_metadata:meta,state:{values:val('x')}}},{...o,fetch:s.fetch});
- assert.match(out.errors.notes_input_block,/Try Save again/);
-});
-
-test('Save falls back to the card as it was opened when the channel cannot be read',async()=>{
- d._openCards.set('C0COMPLETED|1793741271.447669',card());
- const s=fakeSlack({'conversations.history':()=>({ok:false,error:'missing_scope'}),'chat.update':()=>({ok:true})});
- const out=await d.saveDescription({view:{private_metadata:JSON.stringify({c:'C0COMPLETED',ts:'1793741271.447669'}),state:{values:{notes_input_block:{notes_input_action:{value:'ok'}}}}}},{...o,fetch:s.fetch});
- assert.equal(out,null);assert.ok(s.calls.some(c=>c.m==='chat.update'));
 });

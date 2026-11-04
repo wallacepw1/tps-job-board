@@ -11,6 +11,7 @@ const { registerHelperEvents } = require('./helper-events');
 const { registerRundownRefresh } = require('./rundown-refresh');
 const { summaryHome, registerSummarySurface } = require('./jobs-summary-surface');
 const {TECHS}=require('./assignment-policy');
+const {registerDescriptionHandlers}=require('./board-description');
 const {boardRole,canViewJob,canAddNotes,scopedFilters}=require('./board-scope');
 
 const REFRESH_MS = Number(process.env.REFRESH_SECONDS || 120) * 1000;
@@ -21,7 +22,7 @@ registerCallActionsProxy(receiver, { get store() { return store; } });
 registerJobFilesGallery(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
-receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:4}));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:5}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
@@ -62,6 +63,7 @@ async function rerender(body, client) {
 }
 
 registerAssignmentHandlers(app, { store, refresh, publishHome, messageModal });
+registerDescriptionHandlers(app,{store});
 registerHelperEvents(app);
 registerRundownRefresh(app);
 registerSummarySurface(app);
@@ -174,7 +176,7 @@ async function postToThread(client, { url, user, notes, files }) {
 // Link buttons still send an action; acknowledge them so Slack shows no error.
 app.action(/^(thread|techmsg|future|files|map|cal|completed)_/, async ({ ack }) => ack());
 
-const watchedChannels=new Set(['C0C19TG3KJ6','C0C2XUL7ZHN','C0C2XB4VD1N','C0C2YDBHFFY',...TECHS.map(t=>t.channel)]);
+const watchedChannels=new Set(['C0C19TG3KJ6','C0C2XUL7ZHN','C0C2XB4VD1N','C0C2YDBHFFY','C0C5VVDCQ92','C0C5B0WGZ7H',...TECHS.map(t=>t.channel)]);
 let boardRefreshTimer;
 app.event('message',async({event})=>{if(!watchedChannels.has(event.channel))return;const message=event.message||event;store.invalidateThread(event.channel,message.thread_ts||event.thread_ts||message.ts);clearTimeout(boardRefreshTimer);boardRefreshTimer=setTimeout(()=>refresh(),2000);boardRefreshTimer.unref?.();});
 
@@ -229,4 +231,3 @@ app.shortcut('open_job_board', async ({ ack, shortcut, client }) => {
   refresh();
   setInterval(refresh, REFRESH_MS);
 })();
-

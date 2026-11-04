@@ -187,7 +187,7 @@ class JobStore {
   }
 
   async fetchWorkflow(){
-    const channels=[{role:'assign',channel:process.env.ASSIGN_CHANNEL_ID||'C0C2XUL7ZHN'},{role:'future',channel:FUTURE_CHANNEL_ID},{role:'completed',channel:process.env.COMPLETED_CHANNEL_ID||'C0C2YDBHFFY'},...TECHS.map(tech=>({role:'plumber',channel:tech.channel,tech}))];
+    const channels=[{role:'assign',channel:process.env.ASSIGN_CHANNEL_ID||'C0C2XUL7ZHN'},{role:'future',channel:FUTURE_CHANNEL_ID},{role:'completed',channel:process.env.COMPLETED_CHANNEL_ID||'C0C2YDBHFFY'},{role:'price',channel:process.env.PRICE_CHANNEL_ID||'C0C5VVDCQ92'},{role:'closing',channel:process.env.CLOSING_CHANNEL_ID||'C0C5B0WGZ7H'},...TECHS.map(tech=>({role:'plumber',channel:tech.channel,tech}))];
     return indexWorkflow(await Promise.all(channels.map(async c=>({...c,messages:await this.readWorkflowChannel(c.channel)}))));
   }
 

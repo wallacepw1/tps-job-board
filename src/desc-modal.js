@@ -1,9 +1,10 @@
 'use strict';
 // "Write description" pop-up for #completed cards (Paul, Nov 4 2026). Opens from a button on the TPS Bot card and shows
 // the plumber's notes, the Call Description box (already holding the card's text or the AI draft), the work order PDF and
-// the job photos. Save writes the text back into the card's Call Description box; the office then presses Complete as
-// before, so Call Route reads the description exactly as it always has. Everything here runs on Render: no Latenode run.
+// the job photos. Submitting uses the same Call Route action as Complete on the card.
 const jf=require('./job-files');
+const {ADMINS}=require('./assignment-policy');
+const COMPLETED='C0C2YDBHFFY',ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 
 const OPEN_ACTION='tps_desc_open',CALLBACK='tps_desc_modal';
 const INPUT_BLOCK='notes_input_block',INPUT_ACTION='notes_input_action';
@@ -72,7 +73,7 @@ function descView({jobNumber,notes,text,hint,files=[],folderId,meta},o={},now=Da
  blocks.push({type:'section',block_id:'tps_desc_notes',text:{type:'mrkdwn',text:`*Plumber Notes*\n${clean(notes)||'_(no comment left)_'}`.slice(0,3000)}});
  const el={type:'plain_text_input',action_id:INPUT_ACTION,multiline:true,placeholder:plain('Required to Complete. Goes on the QuickBooks invoice')};
  if(text)el.initial_value=String(text).slice(0,3000);
- blocks.push({type:'input',block_id:INPUT_BLOCK,label:plain('Call Description'),element:el,optional:false,hint:plain(hint||'Save puts this in the card. Then press Complete on the card.')});
+ blocks.push({type:'input',block_id:INPUT_BLOCK,label:plain('Call Description'),element:el,optional:false,hint:plain('Submit sends this description to pricing, just like Complete on the card.')});
  const order={pdf:0,photo:1,video:2,file:3,folder:4};
  const sorted=files.filter(f=>jf.kindOf(f)!=='folder').sort((a,b)=>order[jf.kindOf(a)]-order[jf.kindOf(b)]||String(a.created).localeCompare(String(b.created)));
  const counts=sorted.reduce((c,f)=>(c[jf.kindOf(f)]=(c[jf.kindOf(f)]||0)+1,c),{});
@@ -98,20 +99,17 @@ function descView({jobNumber,notes,text,hint,files=[],folderId,meta},o={},now=Da
   }
  }
  if(hidden)blocks.push({type:'context',elements:[{type:'mrkdwn',text:`${hidden} more not shown.${folderId?` <${jf.folderUrl(folderId)}|Open the job folder in Drive>`:''}`}]});
- return{type:'modal',callback_id:CALLBACK,private_metadata:JSON.stringify(meta||{}),title:plain(jobNumber?`Job ${jobNumber}`:'Call description'),submit:plain('Save to card'),close:plain('Cancel'),blocks:blocks.slice(0,MAX_BLOCKS)};
+ return{type:'modal',callback_id:CALLBACK,private_metadata:JSON.stringify(meta||{}),title:plain(jobNumber?`Job ${jobNumber}`:'Call description'),submit:plain('Submit description'),close:plain('Cancel'),blocks:blocks.slice(0,MAX_BLOCKS)};
 }
 
-// Cards opened in this process, so Save still works if the bot can't read the channel back.
-const openCards=new Map();
 async function openDescModal(payload,o={}){
- const token=env(o,'TPS_BOT_TOKEN');if(!token)return'TPS_BOT_TOKEN is not set';
+ const token=o.modalToken||env(o,'TPS_BOT_TOKEN');if(!token)return'TPS_BOT_TOKEN is not set';
+ if(!ADMINS.includes(payload.user?.id))throw Error('Only TPS admins may submit work descriptions.');
  const fetcher=o.fetch||global.fetch;
  const blocks=payload.message?.blocks||[];
  const refs=cardRefs(blocks);
- const opened=await jf.slackApi('views.open',{trigger_id:payload.trigger_id,view:loadingView(refs.jobNumber)},token,fetcher);
+ const opened=o.openedView?{view:o.openedView}:await jf.slackApi(payload.view?.type==='modal'?'views.push':'views.open',{trigger_id:payload.trigger_id,view:loadingView(refs.jobNumber)},token,fetcher);
  const meta={c:payload.channel?.id||payload.container?.channel_id,ts:payload.message?.ts||payload.container?.message_ts,j:refs.jobNumber};
- if(openCards.size>200)openCards.clear();
- openCards.set(`${meta.c}|${meta.ts}`,blocks);
  const files=await gatherFiles(refs,o);
  const hint=inputBlock(blocks)?.hint?.text;
  const view=descView({jobNumber:refs.jobNumber,notes:plumberNotes(blocks),text:currentText(payload),hint,files,folderId:refs.folderId,meta},o);
@@ -123,27 +121,48 @@ async function openDescModal(payload,o={}){
  return`opened ${refs.jobNumber} files=${files.length}`;
 }
 
-// Save: put the text into the card's Call Description box. Returns the body for Slack's view_submission response.
-async function saveDescription(payload,o={}){
- const token=env(o,'TPS_BOT_TOKEN');const fetcher=o.fetch||global.fetch;
- const err=t=>({response_action:'errors',errors:{[INPUT_BLOCK]:t}});
- let meta;try{meta=JSON.parse(payload.view?.private_metadata||'{}');}catch{meta={};}
- const text=String(payload.view?.state?.values?.[INPUT_BLOCK]?.[INPUT_ACTION]?.value||'').trim();
- if(!text)return err('Write the description first.');
- if(!token||!/^C[A-Z0-9]+$/.test(meta.c||'')||!/^\d{10}\.\d{6}$/.test(meta.ts||''))return err("Couldn't find the card. Close this and try again.");
- let blocks=null,msgText='';
- try{
-  const h=await jf.slackApi('conversations.history',{channel:meta.c,latest:meta.ts,oldest:meta.ts,inclusive:true,limit:1},token,fetcher);
-  const m=(h.messages||[]).find(x=>x.ts===meta.ts);if(m){blocks=m.blocks||[];msgText=m.text||'';}
- }catch(e){console.warn('desc modal read card',e.message);}
- if(!blocks)blocks=openCards.get(`${meta.c}|${meta.ts}`)||null;
- if(!blocks)return err("Couldn't read the card. Close this and try again.");
- if(!inputBlock(blocks))return err('This card was already completed, so the description box is gone.');
- const updated=blocks.map(b=>b?.type==='input'&&b.block_id===INPUT_BLOCK?{...b,element:{...b.element,initial_value:text.slice(0,3000)}}:b);
- try{await jf.slackApi('chat.update',{channel:meta.c,ts:meta.ts,blocks:updated,text:msgText||payload.view?.title?.text||'Call'},token,fetcher);}
- catch(e){console.warn('desc modal save',e.message);return err("Couldn't save to the card. Try Save again.");}
- openCards.set(`${meta.c}|${meta.ts}`,updated);
- return null;
+// Always re-read the source before submitting. A cached modal may outlive its card.
+const submissions=new Map();
+function submissionText(p){return String(p.view?.state?.values?.[INPUT_BLOCK]?.[INPUT_ACTION]?.value||'').trim();}
+function submissionError(p){const text=submissionText(p);return !text?'Write the description first.':text.length>3000?'Keep the description within 3,000 characters.':null;}
+function resultView(job,text){return{type:'modal',title:plain(job?'Job '+job:'Call description'),close:plain('Close'),blocks:[{type:'section',text:{type:'plain_text',text}}]};}
+async function readSource(meta,o){
+ if(meta.c!==COMPLETED||!/^\d{10}\.\d{6}$/.test(meta.ts||'')||!/^\d{5,7}$/.test(meta.j||''))throw Error('This is not a current Completed call.');
+ const h=await jf.slackApi('conversations.history',{channel:meta.c,latest:meta.ts,oldest:meta.ts,inclusive:true,limit:1},env(o,'TPS_BOT_TOKEN'),o.fetch||global.fetch);
+ const m=(h.messages||[]).find(x=>x.ts===meta.ts);
+ if(!m||cardRefs(m.blocks).jobNumber!==meta.j)throw Error('The Completed card changed. Refresh the board and reopen it.');
+ if(!inputBlock(m.blocks)||!(m.blocks||[]).some(b=>(b.elements||[]).some(e=>e.action_id==='submitnotes'))||(m.blocks||[]).some(b=>b.block_id==='tps_desc_queued'))throw Error('This description was already submitted or is being verified. Check the Job Board before retrying.');
+ return m;
 }
-
-module.exports={OPEN_ACTION,CALLBACK,cardRefs,plumberNotes,currentText,gatherFiles,descView,openDescModal,saveDescription,_openCards:openCards};
+async function submitDescription(payload,o={}){
+ let meta={};try{meta=JSON.parse(payload.view?.private_metadata||'{}');}catch{}
+ const id=meta.c+'|'+meta.ts,err=submissionError(payload),user=payload.user?.id;
+ if(err)return{error:err};
+ if(!ADMINS.includes(user))return{error:'Only TPS admins may submit work descriptions.'};
+ if(!env(o,'TPS_BOT_TOKEN')||!env(o,'TPS_INTERNAL_KEY'))return{error:'Description submission is not connected.'};
+ if(submissions.has(id))return{uncertain:true,error:'This description was already submitted or is being verified. Check the Job Board before retrying.'};
+ submissions.set(id,'checking');let dispatched=false,marked=false;
+ try{
+  const m=await readSource(meta,o),text=submissionText(payload);
+  const updated=m.blocks.map(b=>b.block_id===INPUT_BLOCK?{...b,element:{...b.element,initial_value:text}}:b);
+  const waiting=updated.filter(b=>b.type!=='input'&&!(b.type==='actions'&&(b.elements||[]).some(e=>e.action_id==='submitnotes')));
+  waiting.push({type:'rich_text',block_id:'tps_desc_saved',elements:[{type:'rich_text_section',elements:[{type:'text',text}]}]},{type:'section',block_id:'tps_desc_queued',text:{type:'plain_text',text:'Description saved above. Sending to pricing. Please do not submit again.'}});
+  // Persist the pending marker before dispatch, so a restart cannot replay an uncertain request.
+  await jf.slackApi('chat.update',{channel:meta.c,ts:meta.ts,text:m.text||meta.j,blocks:waiting},env(o,'TPS_BOT_TOKEN'),o.fetch||global.fetch);marked=true;
+  const p={type:'block_actions',user:{id:user},team:{id:'T086X85G14N'},api_app_id:'A0C54G77M6E',channel:{id:meta.c},container:{type:'message',channel_id:meta.c,message_ts:meta.ts,is_ephemeral:false},message:{...m,blocks:updated},state:{values:{[INPUT_BLOCK]:{[INPUT_ACTION]:{type:'plain_text_input',value:text}}}},actions:[{type:'button',action_id:'submitnotes',value:'Submit',action_ts:(Date.now()/1000).toFixed(6)}]};
+  dispatched=true;
+  const r=await(o.fetch||global.fetch)(ROUTE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload:JSON.stringify({key:env(o,'TPS_INTERNAL_KEY'),tps_assignment_verified:p})}),signal:AbortSignal.timeout(95000)});
+  if(!r.ok)throw Error('Routing response '+r.status);
+  return{queued:true,message:'Description submitted. The call is being sent to pricing. Its card and Job Board will update when routing finishes.'};
+ }catch(e){
+  if(!marked&&!dispatched)submissions.delete(id);
+  return{uncertain:marked||dispatched,error:marked||dispatched?'The description is saved, but routing is not yet verified. Check the Job Board before retrying.':e.message};
+ }
+}
+async function finishSubmission(payload,o={}){
+ const r=await submitDescription(payload,o);
+ let meta={};try{meta=JSON.parse(payload.view?.private_metadata||'{}');}catch{}
+ await jf.slackApi('views.update',{view_id:payload.view.id,view:resultView(meta.j,r.message||r.error)},o.modalToken||env(o,'TPS_BOT_TOKEN'),o.fetch||global.fetch).catch(e=>console.warn('description result',e.message));
+ return r;
+}
+module.exports={OPEN_ACTION,CALLBACK,cardRefs,plumberNotes,currentText,gatherFiles,descView,openDescModal,submissionError,resultView,readSource,submitDescription,finishSubmission,_submissions:submissions};
