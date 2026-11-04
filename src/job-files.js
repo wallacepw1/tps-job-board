@@ -269,4 +269,4 @@ async function postJobFilesCard({channel,jobNumber,filesUrl},o={}){
  return slackApi('chat.postMessage',cardMessage(channel,jobNumber,folderId),token,o.fetch||global.fetch);
 }
 
-module.exports={FILES_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
+module.exports={slackApi,kindOf,baseUrl,folderUrl,viewLink,MODAL_IMG_TTL,MODAL_LINK_TTL,FILES_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
