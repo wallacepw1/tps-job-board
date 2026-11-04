@@ -134,3 +134,14 @@ test('signed /phone through the Assistant endpoint opens the pop-up and never re
   await new Promise(r => setTimeout(r, 20));
   assert.deepEqual(sent, ['https://slack.com/api/views.open', 'https://slack.com/api/views.update']);
 });
+
+test('/phone check lists the feed series for checking times', async () => {
+  const { describeFeed } = require('../src/oncall-calendar');
+  const lines = await describeFeed({ url: 'x', load: async () => data });
+  assert.ok(lines.some(l => /^Esteban On Call \| start 2025-01-13T15:00:00.000Z tz=America\/Vancouver/.test(l)));
+  const posts = [];
+  const out = handlePhone({ command: '/phone', text: 'check', user_id: ADMIN, team_id: TEAM, response_url: 'https://hooks.slack.com/x' }, { fetch: async (u, i) => { posts.push(JSON.parse(i.body)); return { ok: true }; }, token: '' });
+  assert.match(out.json.text, /Checking/);
+  await out.follow;
+  assert.match(posts[0].text, /ONCALL_CALENDAR_ICS_URL is not set|```/);
+});

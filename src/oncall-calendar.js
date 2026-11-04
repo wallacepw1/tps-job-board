@@ -70,4 +70,21 @@ async function readOnCall({ url = process.env.ONCALL_CALENDAR_ICS_URL, now = new
   return { connected: true, current, upcoming: shifts.filter(s => s.start > now) };
 }
 
-module.exports = { readOnCall, shiftsBetween, personFromTitle, PEOPLE, fromWall, wall };
+// What the feed itself says about each on-call series, for checking times (/phone check).
+async function describeFeed({ url = process.env.ONCALL_CALENDAR_ICS_URL, load = u => ical.async.fromURL(u) } = {}) {
+  if (!url) return ['ONCALL_CALENDAR_ICS_URL is not set.'];
+  const data = await load(url);
+  const lines = [];
+  const cal = Object.values(data).find(x => x.type === 'VCALENDAR');
+  if (cal) lines.push(`Calendar tz: ${cal['WR-TIMEZONE'] || cal['X-WR-TIMEZONE'] || '?'}`);
+  lines.push('Zones in feed: ' + (Object.values(data).filter(x => x.type === 'VTIMEZONE').map(x => x.tzid).join(', ') || 'none'));
+  for (const ev of Object.values(data)) {
+    if (ev.type !== 'VEVENT' || !ev.rrule) continue;
+    const until = ev.rrule.options?.until;
+    if (until && until < new Date()) continue;
+    lines.push(`${String(ev.summary || '').trim()} | start ${new Date(ev.start).toISOString()} tz=${ev.start.tz || '-'} | end ${new Date(ev.end).toISOString()} | ${String(ev.rrule.toString()).replace(/\n/g, ' ')} | overrides ${Object.keys(ev.recurrences || {}).length}`);
+  }
+  return lines;
+}
+
+module.exports = { describeFeed, readOnCall, shiftsBetween, personFromTitle, PEOPLE, fromWall, wall };

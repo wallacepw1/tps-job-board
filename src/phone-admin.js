@@ -5,6 +5,7 @@
 const { ADMINS } = require('./assignment-policy');
 const { loadSnapshot, statusBlocks } = require('./phone-status');
 const { slackApi } = require('./job-files');
+const { describeFeed } = require('./oncall-calendar');
 
 const TEAM = 'T086X85G14N';
 const OPEN = 'tps_phone_open', REFRESH = 'tps_phone_refresh', CALLBACK = 'tps_phone_settings';
@@ -12,6 +13,7 @@ let cached = null; // { at, snap }
 
 function phoneRequest(body) {
   const base = { user: body?.user_id || body?.user?.id, team: body?.team_id || body?.team?.id, trigger: body?.trigger_id, responseUrl: body?.response_url };
+  if (body?.command === '/phone' && /^\s*check\b/i.test(body.text || '')) return { ...base, kind: 'check' };
   if (body?.command === '/phone' || (body?.command === '/admin' && /^\s*phone\b/i.test(body.text || ''))) return { ...base, kind: 'open' };
   const action = body?.actions?.[0]?.action_id || '';
   if (body?.type === 'block_actions' && action === OPEN) return { ...base, kind: 'open' };
@@ -44,6 +46,15 @@ function handlePhone(body, { fetch: fetcher = global.fetch, load, token = proces
   const isCommand = !!body.command;
   const say = text => isCommand ? { status: 200, json: { response_type: 'ephemeral', text } } : { status: 200, body: '' };
   if (req.team !== TEAM || !ADMINS.includes(req.user)) return say('🔒 Phone settings are limited to TPS admins.');
+  if (req.kind === 'check') {
+    if (!/^https:\/\/hooks\.slack\.com\//.test(req.responseUrl || '')) return say('Slack sent no reply address.');
+    const follow = (async () => {
+      let text;
+      try { text = '```' + (await describeFeed()).join('\n').slice(0, 3500) + '```'; } catch (e) { text = `⚠️ Couldn’t read the calendar (${e.message}).`; }
+      await fetcher(req.responseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response_type: 'ephemeral', text }), signal: AbortSignal.timeout(10000) });
+    })().catch(e => console.error('phone check failed', e.message));
+    return { ...say('Checking the On call calendar feed…'), follow };
+  }
   if (!token) return say('📞 Phone settings need one more Render setting (TPS_ASSISTANT_BOT_TOKEN) before the pop-up can open.');
   const follow = (async () => {
     if (req.kind === 'refresh' && req.viewId) {
