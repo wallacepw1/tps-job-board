@@ -3,6 +3,7 @@
 // the plumber's notes, the Call Description box (already holding the card's text or the AI draft), the work order PDF and
 // the job photos. Submitting uses the same Call Route action as Complete on the card.
 const jf=require('./job-files');
+const {collectWorkNotes}=require('./work-notes');
 const {ADMINS}=require('./assignment-policy');
 const COMPLETED='C0C2YDBHFFY',ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 
@@ -46,24 +47,25 @@ function currentText(payload){
 
 // ---- files: the Incoming Calls thread (where Complete copied the plumber's files) + the Drive job folder ----
 async function slackFiles(incoming,o){
- const token=env(o,'TPS_BOT_TOKEN');if(!incoming||!token)return[];
- const out=[];let cursor='';
+ const token=env(o,'TPS_BOT_TOKEN');if(!incoming||!token)return{files:[],notes:''};
+ const out=[],messages=[];let cursor='';
  for(let i=0;i<5;i++){
   const j=await jf.slackApi('conversations.replies',{channel:incoming.channel,ts:incoming.ts,limit:200,...(cursor?{cursor}:{})},token,o.fetch||global.fetch);
+  messages.push(...j.messages||[]);
   for(const m of j.messages||[])for(const f of m.files||[])if(f.id&&f.mode!=='tombstone')out.push({src:'slack',id:f.id,name:f.name||f.title||'file',mimeType:f.mimetype||'',permalink:f.permalink,created:String(f.created||m.ts)});
   cursor=j.response_metadata?.next_cursor;if(!cursor)break;
  }
- return out;
+ return{files:out,notes:collectWorkNotes(messages)};
 }
 async function driveFiles(folderId,o){
  if(!folderId||!env(o,'GOOGLE_API_KEY'))return[];
  return(await jf.listFolder(folderId,o)).map(f=>({src:'drive',...f,created:f.createdTime||''}));
 }
 async function gatherFiles(refs,o){
- const [d,s]=await Promise.all([driveFiles(refs.folderId,o).catch(e=>(console.warn('desc modal drive',e.message),[])),slackFiles(refs.incoming,o).catch(e=>(console.warn('desc modal slack',e.message),[]))]);
+ const [d,s]=await Promise.all([driveFiles(refs.folderId,o).catch(e=>(console.warn('desc modal drive',e.message),[])),slackFiles(refs.incoming,o).catch(e=>(console.warn('desc modal slack',e.message),{files:[],notes:''}))]);
  const seen=new Set(),files=[];
- for(const f of[...d,...s]){const k=`${jf.kindOf(f)}|${String(f.name).toLowerCase()}`;if(seen.has(k))continue;seen.add(k);files.push(f);}
- return files;
+ for(const f of[...d,...s.files]){const k=`${jf.kindOf(f)}|${String(f.name).toLowerCase()}`;if(seen.has(k))continue;seen.add(k);files.push(f);}
+ return{files,notes:s.notes};
 }
 
 // ---- the pop-up ----
@@ -110,9 +112,10 @@ async function openDescModal(payload,o={}){
  const refs=cardRefs(blocks);
  const opened=o.openedView?{view:o.openedView}:await jf.slackApi(payload.view?.type==='modal'?'views.push':'views.open',{trigger_id:payload.trigger_id,view:loadingView(refs.jobNumber)},token,fetcher);
  const meta={c:payload.channel?.id||payload.container?.channel_id,ts:payload.message?.ts||payload.container?.message_ts,j:refs.jobNumber};
- const files=await gatherFiles(refs,o);
+ const {files,notes:incomingNotes}=await gatherFiles(refs,o);
+ const cardNotes=plumberNotes(blocks),notes=cardNotes&&cardNotes!=='(no comment left)'?cardNotes:incomingNotes;
  const hint=inputBlock(blocks)?.hint?.text;
- const view=descView({jobNumber:refs.jobNumber,notes:plumberNotes(blocks),text:currentText(payload),hint,files,folderId:refs.folderId,meta},o);
+ const view=descView({jobNumber:refs.jobNumber,notes,text:currentText(payload),hint,files,folderId:refs.folderId,meta},o);
  await jf.slackApi('views.update',{view_id:opened.view.id,hash:opened.view.hash,view},token,fetcher).catch(async e=>{
   // A rejected image (for example a Slack file the bot can't see) shouldn't lose the description box.
   console.warn('desc modal update',e.message);
