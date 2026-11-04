@@ -17,7 +17,7 @@ const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_
 registerCallActionsProxy(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
-receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:1}));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:2}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
