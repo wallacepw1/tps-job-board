@@ -52,6 +52,9 @@ function entity(jobNumber,folderId,previewUrl){
 }
 const FILES_ACTION='tps_job_files_open',FILES_VIDEO_TEST_ACTION='tps_job_files_video_test';
 function filesButton(jobNumber,folderId){return{type:'button',action_id:FILES_ACTION,text:{type:'plain_text',text:'Files'},value:`${jobNumber}:${folderId}`};}
+// A permanent Files link for cards (Paul, Nov 4 2026: Files opens the gallery directly). It carries the Drive folder
+// URL as-is, so code that reads the folder back out of a card still finds it, and /job-files/go signs a fresh gallery link.
+function goUrl(folder,jobNumber,o={}){const id=folderIdFrom(folder);return id&&validJob(String(jobNumber))?`${baseUrl(o)}/job-files/go?job=${jobNumber}&f=${folderUrl(id)}`:folder;}
 function cardMessage(channel,jobNumber,folderId){
  const text=`📁 Job files · ${jobNumber}: work order, photos and videos in Drive.`;
  return{channel,text,unfurl_links:false,unfurl_media:false,
@@ -117,7 +120,7 @@ async function slackApi(method,body,token,fetcher){
 }
 
 // ---- Drive ----
-const listCache=new Map(); // folderId -> {at, files}
+const listCache=new Map(),goChecked=new Map(); // folderId -> {at, files}
 async function listFolder(folderId,o={}){
  const hit=listCache.get(folderId);if(hit&&Date.now()-hit.at<60000)return hit.files;
  const key=env(o,'GOOGLE_API_KEY');if(!key)throw Error('GOOGLE_API_KEY is not set');
@@ -239,6 +242,21 @@ function errorHtml(msg){return`<!doctype html><meta charset="utf-8"><meta name="
 function registerJobFilesGallery(receiver,o={}){
  const frame=res=>res.set('Content-Security-Policy',FRAME_ANCESTORS).set('Cache-Control','private, max-age=60');
  receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET'),videoTest:2}));
+ // Files button target: only folders named for their job (the TPS invoice folders) are opened.
+ receiver.router.get('/job-files/go',async(req,res)=>{
+  const job=String(req.query.job||''),id=folderIdFrom(String(req.query.f||''));
+  if(!validJob(job)||!id)return res.status(400).type('html').send(errorHtml('This Files link is not valid.'));
+  try{
+   let ok=goChecked.get(id+'|'+job);
+   if(ok===undefined){
+    const r=await(o.fetch||global.fetch)(`https://www.googleapis.com/drive/v3/files/${id}?fields=name,mimeType&supportsAllDrives=true&key=${encodeURIComponent(env(o,'GOOGLE_API_KEY'))}`,{signal:AbortSignal.timeout(8000)});
+    const f=r.ok?await r.json():{};ok=f.mimeType==='application/vnd.google-apps.folder'&&new RegExp(`^\\s*${job}\\b`).test(f.name||'');
+    if(r.ok){if(goChecked.size>2000)goChecked.clear();goChecked.set(id+'|'+job,ok);}
+   }
+   if(!ok)return res.redirect(folderUrl(id));
+   res.redirect(galleryUrl(id,job,o,Date.now(),12*3600));
+  }catch{res.redirect(folderUrl(id));}
+ });
  receiver.router.get('/job-files/:folder',async(req,res)=>{
   frame(res);
   const {folder}=req.params,{job,exp,sig}=req.query;
@@ -328,4 +346,4 @@ async function postJobFilesCard({channel,jobNumber,filesUrl},o={}){
  return slackApi('chat.postMessage',cardMessage(channel,jobNumber,folderId),token,o.fetch||global.fetch);
 }
 
-module.exports={slackApi,kindOf,baseUrl,folderUrl,viewLink,MODAL_IMG_TTL,MODAL_LINK_TTL,FILES_ACTION,FILES_VIDEO_TEST_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
+module.exports={goUrl,slackApi,kindOf,baseUrl,folderUrl,viewLink,MODAL_IMG_TTL,MODAL_LINK_TTL,FILES_ACTION,FILES_VIDEO_TEST_ACTION,filesButton,parseFilesValue,filesModal,openFilesModal,signedQuery,viewerHtml,folderIdFrom,refId,parseRef,sign,verify,galleryUrl,entity,cardMessage,listFolder,galleryHtml,registerJobFilesGallery,presentJobFiles,postJobFilesCard,FRAME_ANCESTORS,_listCache:listCache};
