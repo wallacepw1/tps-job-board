@@ -22,7 +22,7 @@ registerCallActionsProxy(receiver, { get store() { return store; } });
 registerJobFilesGallery(receiver);
 registerAssistantEventsProxy(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
-receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:5}));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:6}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
