@@ -86,7 +86,7 @@ function descView({jobNumber,notes,text,hint,files=[],folderId,meta},o={},now=Da
  const counts=sorted.reduce((c,f)=>(c[jf.kindOf(f)]=(c[jf.kindOf(f)]||0)+1,c),{});
  const label=(n,w)=>n?`${n} ${w}${n===1?'':'s'}`:'';
  const summary=[label(counts.pdf,'PDF'),label(counts.photo,'photo'),label(counts.video,'video'),label(counts.file,'other file')].filter(Boolean).join(' · ')||'No files yet';
- blocks.push({type:'divider'},{type:'context',elements:[{type:'mrkdwn',text:`*Job files:* ${summary}`}]});
+ blocks.push({type:'divider'},folderId?{type:'section',text:{type:'mrkdwn',text:`*Job files:* ${summary}`},accessory:{type:'button',action_id:'tps_desc_gallery',text:plain('📷 View full screen'),url:jf.galleryUrl(folderId,jobNumber,o,now,jf.MODAL_LINK_TTL)}}:{type:'context',elements:[{type:'mrkdwn',text:`*Job files:* ${summary}`}]});
  const img=folderId&&jf.signedQuery(folderId,jobNumber,o,now,jf.MODAL_IMG_TTL),link=folderId&&jf.signedQuery(folderId,jobNumber,o,now,jf.MODAL_LINK_TTL),base=jf.baseUrl(o);
  const thumb=f=>`${base}/job-files/${folderId}/thumb/${encodeURIComponent(f.id)}?${img}&w=1000`;
  let photos=0,hidden=0;

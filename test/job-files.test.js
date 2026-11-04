@@ -29,7 +29,7 @@ test('gallery lists PDFs first, escapes names, and links each file to Drive',()=
   {id:'vid1aaaaaaaaaa',name:'clip.mp4',mimeType:'video/mp4',createdTime:'2026-10-25'}]});
  assert.ok(html.indexOf('261269-1.pdf')<html.indexOf('WhatsApp_132198'));
  assert.ok(html.includes('&lt;x&gt;')&&!html.includes('<x>'));
- assert.ok(html.includes('https://drive.google.com/file/d/vid1aaaaaaaaaa/view'));
+ assert.ok(html.includes('/job-files/'+FOLDER+'/view/vid1aaaaaaaaaa?'),'videos open in the built-in player');
  assert.ok(html.includes('1 PDF · 1 photo · 1 video'));
 });
 test('gallery route sends frame-ancestors for Slack and refuses unsigned links',async()=>{
@@ -41,12 +41,12 @@ test('gallery route sends frame-ancestors for Slack and refuses unsigned links',
  await routes['/job-files/:folder']({params:{folder:FOLDER},query:Object.fromEntries(q)},res);
  assert.equal(res.code,undefined);assert.ok(res.body.includes('a.jpg'));
 });
-test('photos and PDFs open inside the panel; videos still open in Drive',()=>{
+test('photos and PDFs open inside the panel; videos play in the built-in player',()=>{
  const html=jf.galleryHtml({jobNumber:'132198',folderId:FOLDER,query:'job=132198&exp=1&sig=a',files:[
   {id:'pdf1aaaaaaaaaa',name:'wo.pdf',mimeType:'application/pdf'},{id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'},{id:'vid1aaaaaaaaaa',name:'v.mp4',mimeType:'video/mp4'}]});
  assert.ok(html.includes(`/job-files/${FOLDER}/view/pdf1aaaaaaaaaa?job=132198&amp;exp=1&amp;sig=a`));
  assert.ok(html.includes(`/job-files/${FOLDER}/view/img1aaaaaaaaaa?`));
- assert.ok(!html.includes('/view/vid1'));
+ assert.ok(html.includes('/view/vid1')&&html.includes('/video/vid1'));
  const pdf=jf.viewerHtml({jobNumber:'132198',folderId:FOLDER,query:'job=132198&exp=1&sig=a',file:{id:'pdf1aaaaaaaaaa',name:'wo.pdf',mimeType:'application/pdf'}});
  assert.ok(pdf.includes('pdf.min.js')&&pdf.includes(`/job-files/${FOLDER}/raw/pdf1aaaaaaaaaa?job=132198&exp=1&sig=a`));
  assert.ok(pdf.includes('Open in Drive'));
@@ -84,4 +84,33 @@ test('openFilesModal opens a loading view on the trigger, then fills it from Dri
  const r=await jf.openFilesModal({trigger_id:'T1',actions:[{action_id:jf.FILES_ACTION,value:`132198:${FOLDER}`}]},{...o,TPS_BOT_TOKEN:'x',fetch});
  assert.equal(r,'opened');assert.deepEqual(calls.map(c=>c.m),['views.open','views.update']);
  assert.equal(calls[0].b.trigger_id,'T1');assert.equal(calls[1].b.view_id,'V1');assert.ok(calls[1].b.view.blocks.some(b=>b.type==='image'));
+});
+test('gallery opens photos and videos in a full-screen swipe viewer',()=>{
+ const html=jf.galleryHtml({jobNumber:'132275',folderId:FOLDER,query:'job=132275&exp=1&sig=a',files:[
+  {id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'},{id:'vid1aaaaaaaaaa',name:'b.mp4',mimeType:'video/mp4'},{id:'pdf1aaaaaaaaaa',name:'c.pdf',mimeType:'application/pdf'}]});
+ assert.ok(html.includes('data-lb="photo" data-id="img1aaaaaaaaaa"'));
+ assert.ok(html.includes('data-lb="video" data-id="vid1aaaaaaaaaa"'));
+ assert.ok(!html.includes('data-lb="pdf"'),'PDFs keep the PDF viewer');
+ assert.ok(html.includes('&amp;w=1600'),'full-size photo');
+ assert.ok(html.includes('id="lb"')&&html.includes('data-video="/job-files/'));
+});
+test('Files pop-up has a View full screen link to the signed gallery',()=>{
+ const v=jf.filesModal({jobNumber:'132275',folderId:FOLDER,files:[]},o);
+ const b=v.blocks[0].accessory;assert.equal(b.text.text,'📷 View full screen');
+ const q=new URL(b.url).searchParams;assert.ok(jf.verify(FOLDER,'132275',q.get('exp'),q.get('sig'),o,Date.now()+23*3600e3),'valid for a day');
+});
+test('video route streams Drive bytes with Range for a plain player',async()=>{
+ const routes={};let sent;
+ jf._listCache.clear();
+ const fetch=async(url,init)=>{if(url.includes('alt=media')){sent=init.headers;return new Response(new Uint8Array([1,2,3]),{status:206,headers:{'content-range':'bytes 0-2/10','content-length':'3'}});}
+  return{ok:true,json:async()=>({files:[{id:'vid1aaaaaaaaaa',name:'a.MOV',mimeType:'video/quicktime'},{id:'img1aaaaaaaaaa',name:'a.jpg',mimeType:'image/jpeg'}]})};};
+ jf.registerJobFilesGallery({router:{get:(p,h)=>routes[p]=h}},{...o,fetch});
+ const q=new URL(jf.galleryUrl(FOLDER,'132198',o)).searchParams;
+ const {PassThrough}=require('node:stream');
+ const mk=()=>{const r=new PassThrough();r.h={};r.chunks=[];r.on('data',c=>r.chunks.push(c));r.set=(k,v)=>{r.h[k.toLowerCase()]=v;return r;};r.status=n=>{r.code=n;return r;};r.end=(...a)=>{PassThrough.prototype.end.apply(r,a);return r;};r.headersSent=false;return r;};
+ const req={params:{folder:FOLDER,file:'vid1aaaaaaaaaa'},query:Object.fromEntries(q),headers:{range:'bytes=0-'},on(){}};
+ const res=mk();await routes['/job-files/:folder/video/:file'](req,res);await new Promise(r=>res.on('finish',r));
+ assert.equal(res.code,206);assert.equal(res.h['content-type'],'video/mp4');assert.equal(res.h['content-range'],'bytes 0-2/10');
+ assert.deepEqual(sent,{Range:'bytes=0-'});assert.deepEqual([...Buffer.concat(res.chunks)],[1,2,3]);
+ const res2=mk();await routes['/job-files/:folder/video/:file']({...req,params:{folder:FOLDER,file:'img1aaaaaaaaaa'}},res2);assert.equal(res2.code,415);
 });
