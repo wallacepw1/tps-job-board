@@ -330,5 +330,3 @@ function jobModal(job, actor) {
 }
 
 module.exports = { homeView, modalView, jobModal, noteModal, messageModal, findModal, filterJobs, jobBlocks, TABS };
-
-

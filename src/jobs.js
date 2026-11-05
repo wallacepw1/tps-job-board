@@ -373,5 +373,3 @@ function applyListCompleted(job, listCompleted) {
 }
 
 module.exports = { JobStore, addFuture, preferEvent, jobNumberIn, dayKey, isIntakePlaceholder, isToSchedule, finalize, applyListCompleted, zonedDate, TZ };
-
-

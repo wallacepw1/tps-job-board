@@ -54,5 +54,3 @@ function pendingActivity(messages){
  return replies.some(m=>(m.files||[]).some(f=>/^image\/|^video\//.test(f.mimetype||'')||/\.(?:jpe?g|png|heic|gif|webp|mp4|mov)$/i.test(f.name||'')||!f.mimetype&&!f.name))&&replies.some(m=>comment(m).length>0);
 }
 module.exports={cardIdentity,indexWorkflow,applyWorkflow,pendingActivity,messageUrl};
-
-

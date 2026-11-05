@@ -89,5 +89,3 @@ function registerCallActionsProxy(receiver,options={}){
  });
 }
 module.exports={verifySlackRequest,relayCallAction,registerCallActionsProxy,inspectJobFilesEvent,registerJobFilesEvents};
-
-

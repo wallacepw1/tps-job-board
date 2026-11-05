@@ -117,4 +117,3 @@ async function route(p,o={}){
  return{};
 }
 module.exports={REVIEW,CALLBACK,EVENT,action,intercepts,submissionError,route,sign,decode,packed,unpacked,queueBlocks,requestCancellation,restore,resultView};
-
