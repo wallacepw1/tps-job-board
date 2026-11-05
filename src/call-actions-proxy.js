@@ -2,6 +2,7 @@
 const {createHmac,timingSafeEqual}=require('node:crypto');
 const {parseRef,presentJobFiles,FILES_ACTION,FILES_VIDEO_TEST_ACTION,openFilesModal}=require('./job-files');
 const desc=require('./desc-modal');
+const cancellation=require('./cancellation-review');
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 function verifySlackRequest(raw,headers,secret,now=Date.now()){
  const ts=headers['x-slack-request-timestamp'],signature=headers['x-slack-signature'];
@@ -40,6 +41,7 @@ async function relayCallAction(raw,headers,{secret=process.env.TPS_CALL_ROUTE_SI
 }
 function registerCallActionsProxy(receiver,options={}){
  registerJobFilesEvents(receiver,options);
+ receiver.router.get('/slack/cancellation-review/health',(_req,res)=>res.json({ready:!!(options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN)&&!!(options.key||process.env.TPS_INTERNAL_KEY),version:1}));
  receiver.router.post('/slack/call-actions',async(req,res)=>{
   let raw='';
   try{
@@ -49,6 +51,22 @@ function registerCallActionsProxy(receiver,options={}){
    if(!verifySlackRequest(raw,req.headers,secret)){res.status(401).send('Request could not be verified.');return;}
    if(!(options.key||process.env.TPS_INTERNAL_KEY)){res.status(503).send('Call controls are not connected.');return;}
    const payload=JSON.parse(new URLSearchParams(raw).get('payload'));
+   if(cancellation.intercepts(payload)){
+    const error=cancellation.submissionError(payload);
+    if(payload.type==='view_submission'&&payload.view?.callback_id!== 'cancel_call_modal'){
+     if(error){res.status(200).json({response_action:'errors',errors:{cancel_reason:error}});return;}
+     res.status(200).json({response_action:'update',view:cancellation.resultView('Processing the cancellation request… Please do not repeat it.')});
+    }else res.status(200).send('');
+    try{
+     const out=await cancellation.route(payload,options);
+     if(out.forward){const reply=await(options.fetch||global.fetch)(ROUTE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload:JSON.stringify({key:options.key||process.env.TPS_INTERNAL_KEY,tps_assignment_verified:out.forward})}),signal:AbortSignal.timeout(95000)});if(!reply.ok)throw Error('Final cancellation review could not be reached.');}
+    }catch(e){
+     console.error('cancellation review',e.message);
+     const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN;
+     await require('./job-files').slackApi(payload.view?.id?'views.update':'views.open',payload.view?.id?{view_id:payload.view.id,view:cancellation.resultView(e.message)}:{trigger_id:payload.trigger_id,view:cancellation.resultView(e.message)},token,options.fetch||global.fetch).catch(()=>{});
+    }
+    return;
+   }
    // Files button on a TPS Bot card: open the files pop-up here, without a Latenode run.
    if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===FILES_VIDEO_TEST_ACTION){res.status(200).send('');if((payload.channel?.id||payload.container?.channel_id)==='C0C2ZVB32RG')console.log('job files video test',await openFilesModal(payload,{...options,inlineVideo:true}).catch(e=>e.message));return;}
    if(payload.type==='block_actions'&&payload.actions?.[0]?.action_id===FILES_ACTION){res.status(200).send('');console.log('job files modal',await openFilesModal(payload,options).catch(e=>e.message));return;}
@@ -71,3 +89,5 @@ function registerCallActionsProxy(receiver,options={}){
  });
 }
 module.exports={verifySlackRequest,relayCallAction,registerCallActionsProxy,inspectJobFilesEvent,registerJobFilesEvents};
+
+

@@ -125,7 +125,7 @@ function filterJobs(jobs, { tab = 'today', tech = 'all', user = null }, now = ne
 function jobBlocks(job, actor) {
   if(!canViewJob(job,actor))return[{type:'section',text:{type:'mrkdwn',text:'This call is not assigned to you.'}}];
   const compact=boardRole(actor)==='plumber';
-  const st = job.workflowStage==='price'?{emoji:'💲',label:'Price These'}:job.workflowStage==='closing'?{emoji:'📬',label:'Closing'}:STATUS[job.status]||STATUS.new;
+  const st = job.workflowStage==='cancellation_review'?{emoji:'🛑',label:'Cancellation review'}:job.workflowStage==='price'?{emoji:'💲',label:'Price These'}:job.workflowStage==='closing'?{emoji:'📬',label:'Closing'}:STATUS[job.status]||STATUS.new;
   const title = [`*${job.jobNumber}*`, job.emergency ? '🚨' : null, job.client ? `· ${truncate(job.client,compact?80:120)}` : null]
     .filter(Boolean).join(' ');
   const lines = [
@@ -140,8 +140,8 @@ function jobBlocks(job, actor) {
     job.status!=='done'&&job.techId&&job.assignedMessageUrl&&button('Tech chat',job.assignedMessageUrl,`techmsg_${job.jobNumber}`),
     job.filesUrl && button('Files', goUrl(job.filesUrl, job.jobNumber), `files_${job.jobNumber}`),
     job.status!=='done'&&mapsUrl(job) && button('Map', mapsUrl(job), `map_${job.jobNumber}`),
-    job.status==='done'&&['price','closing'].includes(job.workflowStage)&&job.workflowMessageUrl&&button(job.workflowStage==='price'?'Price These':'Closing',job.workflowMessageUrl,`completed_${job.jobNumber}`),
-    job.status==='done'&&!['price','closing'].includes(job.workflowStage)&&job.completedMessageUrl&&button('Completed',job.completedMessageUrl,`completed_${job.jobNumber}`),
+    job.status==='done'&&['price','closing','cancellation_review'].includes(job.workflowStage)&&job.workflowMessageUrl&&button(job.workflowStage==='cancellation_review'?'Cancellation review':job.workflowStage==='price'?'Price These':'Closing',job.workflowMessageUrl,`completed_${job.jobNumber}`),
+    job.status==='done'&&!['price','closing','cancellation_review'].includes(job.workflowStage)&&job.completedMessageUrl&&button('Completed',job.completedMessageUrl,`completed_${job.jobNumber}`),
     !compact&&boardRole(actor)==='admin'&&job.workflowStage==='done'&&job.workflowChannel==='C0C2YDBHFFY'&&{type:'button',text:{type:'plain_text',text:'Write Description'},action_id:`write_description_${job.jobNumber}`,value:job.jobNumber},
     // Posts photos and notes into the call's thread in the tech's channel.
     job.assignedMessageUrl && job.status !== 'done' && {
@@ -330,3 +330,5 @@ function jobModal(job, actor) {
 }
 
 module.exports = { homeView, modalView, jobModal, noteModal, messageModal, findModal, filterJobs, jobBlocks, TABS };
+
+
