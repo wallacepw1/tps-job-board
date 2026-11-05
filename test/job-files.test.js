@@ -129,3 +129,11 @@ test('Files link keeps the Drive folder URL and opens a freshly signed gallery',
  assert.equal(res.loc,`https://drive.google.com/drive/folders/${FOLDER}`,'folder not named for the job goes to Drive');
  res=mk();await routes['/job-files/go']({query:{job:'x',f:'y'}},res);assert.equal(res.code,400);
 });
+test('Files link without a job number takes it from the folder name',async()=>{
+ const routes={};
+ jf.registerJobFilesGallery({router:{get:(p,h)=>routes[p]=h}},{...o,fetch:async()=>({ok:true,json:async()=>({name:'132288',mimeType:'application/vnd.google-apps.folder'})})});
+ const mk=()=>({set(){return this;},status(n){this.code=n;return this;},type(){return this;},send(b){this.body=b;return this;},redirect(l){this.loc=l;return this;}});
+ const F2='1ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ';
+ const res=mk();await routes['/job-files/go']({query:{f:`https://drive.google.com/drive/folders/${F2}`}},res);
+ const g=new URL(res.loc);assert.equal(g.pathname,`/job-files/${F2}`);assert.equal(g.searchParams.get('job'),'132288');
+});

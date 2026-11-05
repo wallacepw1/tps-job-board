@@ -244,16 +244,19 @@ function registerJobFilesGallery(receiver,o={}){
  receiver.router.get('/job-files/health',(_q,res)=>res.json({ready:!!env(o,'GOOGLE_API_KEY')&&!!signingKey(o),bot:!!env(o,'TPS_BOT_TOKEN'),events:!!env(o,'TPS_CALL_ROUTE_SIGNING_SECRET'),videoTest:2}));
  // Files button target: only folders named for their job (the TPS invoice folders) are opened.
  receiver.router.get('/job-files/go',async(req,res)=>{
-  const job=String(req.query.job||''),id=folderIdFrom(String(req.query.f||''));
-  if(!validJob(job)||!id)return res.status(400).type('html').send(errorHtml('This Files link is not valid.'));
+  // job is optional: without it the job number is the folder's name (New Call only has the folder link).
+  let job=String(req.query.job||'');const id=folderIdFrom(String(req.query.f||''));
+  if((job&&!validJob(job))||!id)return res.status(400).type('html').send(errorHtml('This Files link is not valid.'));
   try{
-   let ok=goChecked.get(id+'|'+job);
-   if(ok===undefined){
+   let name=goChecked.get(id);
+   if(name===undefined){
     const r=await(o.fetch||global.fetch)(`https://www.googleapis.com/drive/v3/files/${id}?fields=name,mimeType&supportsAllDrives=true&key=${encodeURIComponent(env(o,'GOOGLE_API_KEY'))}`,{signal:AbortSignal.timeout(8000)});
-    const f=r.ok?await r.json():{};ok=f.mimeType==='application/vnd.google-apps.folder'&&new RegExp(`^\\s*${job}\\b`).test(f.name||'');
-    if(r.ok){if(goChecked.size>2000)goChecked.clear();goChecked.set(id+'|'+job,ok);}
+    const f=r.ok?await r.json():{};name=f.mimeType==='application/vnd.google-apps.folder'?String(f.name||''):'';
+    if(r.ok){if(goChecked.size>2000)goChecked.clear();goChecked.set(id,name);}
    }
-   if(!ok)return res.redirect(folderUrl(id));
+   const named=name.match(/^\s*(\d{5,7})\b/)?.[1];
+   if(!job)job=named||'';
+   if(!named||named!==job)return res.redirect(folderUrl(id));
    res.redirect(galleryUrl(id,job,o,Date.now(),12*3600));
   }catch{res.redirect(folderUrl(id));}
  });
