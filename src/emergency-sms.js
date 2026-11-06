@@ -21,6 +21,7 @@ function validSignature(raw, signature, secret) {
   return timingSafeEqual(expected,Buffer.from(signature,'hex'));
 }
 function acknowledgment(route) {
+  if (route === 'emergency_accepted') return 'TPS Plumbing Inc: Your emergency message has been acknowledged. Thank you for contacting us. The plumber may contact you shortly. Reply STOP to opt out or HELP for help.';
   const detail = route === 'office_emergency'
     ? 'Your emergency request was sent to Edgar and Paul. We’ll text you when they acknowledge it.'
     : 'Your emergency request was sent to our on-call plumber. We’ll text you when they accept.';
@@ -30,7 +31,7 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
   const {eventId, recipient, route, issuedAt} = input || {};
   if (!/^[A-Za-z0-9_-]{8,100}$/.test(eventId || '') ||
       !/^\+1\d{10}$/.test(recipient || '') || recipient === OFFICE ||
-      !['office_emergency','emergency'].includes(route) ||
+      !['office_emergency','emergency','emergency_accepted'].includes(route) ||
       !Number.isFinite(issuedAt) || Math.abs(now-issuedAt)>120000) return {status:'invalid'};
   const account = await phone.accountId();
   const path = '/accounts/'+encodeURIComponent(account)+'/messages';
@@ -46,7 +47,7 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
   const keyword = rows.map(messageText).find(text=>STOP.test(text)||START.test(text));
   if (STOP.test(keyword || '')) return {status:'opted_out'};
   if (!keyword && (rows.length>=500 || Number(history.total)>rows.length)) return {status:'consent_history_incomplete'};
-  await send(path,{from:OFFICE,to:[recipient],text:acknowledgment(route),tag:'tps-er-'+eventId});
+  await send(path,{from:OFFICE,to:[recipient],text:acknowledgment(route),tag:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
   return {status:'accepted'};
 }
 function registerEmergencySms(receiver, options={}) {
