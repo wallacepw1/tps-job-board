@@ -23,6 +23,7 @@ const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_
 registerCallActionsProxy(receiver, { get store() { return store; } });
 registerJobFilesGallery(receiver);
 registerAssistantEventsProxy(receiver);
+require('./emergency-sms').registerEmergencySms(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
 receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:8}));
 receiver.router.get('/phone/health', (_req, res) => res.json({phonecom:!!process.env.PHONECOM_API_TOKEN,calendar:!!process.env.ONCALL_CALENDAR_ICS_URL,assistant:!!process.env.TPS_ASSISTANT_SIGNING_SECRET,popup:!!process.env.TPS_ASSISTANT_BOT_TOKEN,sync:onCallSync?.status()||null,version:3}));
