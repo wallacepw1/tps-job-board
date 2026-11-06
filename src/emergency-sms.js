@@ -1,5 +1,5 @@
 'use strict';
-const { createHmac, timingSafeEqual } = require('node:crypto');
+const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
 const { createPhoneCom } = require('./phonecom');
 
 const OFFICE = '+16194763116';
@@ -12,7 +12,9 @@ const number = value => {
   const digits = String(value?.id || value?.number || value || '').replace(/\D/g,'');
   return digits.length === 10 ? '+1'+digits : digits.length === 11 && digits.startsWith('1') ? '+'+digits : '';
 };
-const messageText = row => String(row.text ?? row.message ?? '').trim();
+const messageText = row => String(row.text ?? row.message ?? '').normalize('NFKC').replace(/\r\n/g,'\n').trim();
+const fingerprint = row => createHash('sha256').update(messageText(row)).digest('hex');
+function messageTime(value){const n=Number(value);return Number.isFinite(n)&&n>0?(n<1e12?n*1000:n):Date.parse(value);}
 const ids = row => [row.id,row.uuid,row.message_id,row.messageId].filter(v=>v!=null).map(String);
 
 function validSignature(raw, signature, secret) {
@@ -28,10 +30,12 @@ function acknowledgment(route) {
   return 'TPS Plumbing Inc: '+detail+' A visit is not yet confirmed. If you need more urgent assistance, call 619-476-3116. Reply STOP to opt out or HELP for help.';
 }
 async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now()) {
-  const {eventId, recipient, route, issuedAt} = input || {};
+  const {eventId, recipient, route, issuedAt, inboundHash, inboundAt, replyId} = input || {};
+  const manual=route==='staff_reply', reply=typeof input?.text==='string'?input.text.trim():'';
+  if(manual&&(!reply||reply.length>1200||!/^[A-Za-z0-9_-]{6,80}$/.test(replyId||'')))return {status:'invalid'};
   if (!/^[A-Za-z0-9_-]{8,100}$/.test(eventId || '') ||
       !/^\+1\d{10}$/.test(recipient || '') || recipient === OFFICE ||
-      !['office_emergency','emergency','emergency_accepted'].includes(route) ||
+      !['office_emergency','emergency','emergency_accepted','staff_reply'].includes(route) ||
       !Number.isFinite(issuedAt) || Math.abs(now-issuedAt)>120000) return {status:'invalid'};
   const account = await phone.accountId();
   const path = '/accounts/'+encodeURIComponent(account)+'/messages';
@@ -40,21 +44,26 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
   });
   if (!Array.isArray(history.items)) return {status:'history_unavailable'};
   const rows = history.items;
-  const original = rows.find(row=>ids(row).includes(eventId) &&
-    number(row.from)===recipient && (Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE));
+  const bound=rows.filter(row=>number(row.from)===recipient &&
+    (Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE));
+  const exact=bound.find(row=>ids(row).includes(eventId));
+  const verifiedFingerprint=/^[a-f0-9]{64}$/.test(inboundHash||'')&&Number.isFinite(inboundAt)&&inboundAt>0;
+  const matching=verifiedFingerprint?bound.filter(row=>fingerprint(row)===inboundHash &&
+    Math.abs(messageTime(row.created_at)-inboundAt)<=120000):[];
+  const original=exact||(matching.length===1?matching[0]:null);
   if (input.diagnostic === true) return {
     status:'diagnostic',count:rows.length,fields:Object.keys(rows[0]||{}),
     matchingId:rows.some(row=>ids(row).includes(eventId)),
     matchingSender:rows.some(row=>number(row.from)===recipient),
     matchingOffice:rows.some(row=>(Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE)),
-    emergencyFound:rows.some(row=>isEmergency(messageText(row)))
+    emergencyFound:rows.some(row=>isEmergency(messageText(row))),fingerprintMatches:matching.length
   };
-  if (!original || !isEmergency(messageText(original)) ||
+  if (!original || (!manual&&!isEmergency(messageText(original))) ||
       /^\s*reminder:\s*work order\b/i.test(messageText(original))) return {status:'inbound_unverified'};
   const keyword = rows.map(messageText).find(text=>STOP.test(text)||START.test(text));
   if (STOP.test(keyword || '')) return {status:'opted_out'};
   if (!keyword && (rows.length>=500 || Number(history.total)>rows.length)) return {status:'consent_history_incomplete'};
-  await send(path,{from:OFFICE,to:[recipient],text:acknowledgment(route),tag:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
+  await send(path,{from:OFFICE,to:[recipient],text:manual?'TPS Plumbing Inc: '+reply+' Reply STOP to opt out or HELP for help.':acknowledgment(route),tag:manual?'tps-staff-'+replyId:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
   return {status:'accepted'};
 }
 function registerEmergencySms(receiver, options={}) {
