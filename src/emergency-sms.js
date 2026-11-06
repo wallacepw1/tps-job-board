@@ -22,15 +22,16 @@ function validSignature(raw, signature, secret) {
   const expected = createHmac('sha256',secret).update(raw).digest();
   return timingSafeEqual(expected,Buffer.from(signature,'hex'));
 }
-function acknowledgment(route) {
-  if (route === 'emergency_accepted') return 'TPS Plumbing Inc: Your emergency message has been acknowledged. Thank you for contacting us. The plumber may contact you shortly. Reply STOP to opt out or HELP for help.';
-  const detail = route === 'office_emergency'
-    ? 'Your emergency request was sent to Edgar and Paul. We’ll text you when they acknowledge it.'
-    : 'Your emergency request was sent to our on-call plumber. We’ll text you when they accept.';
-  return 'TPS Plumbing Inc: '+detail+' A visit is not yet confirmed. If you need more urgent assistance, call 619-476-3116. Reply STOP to opt out or HELP for help.';
+function acknowledgment(route, acceptedBy) {
+  const footer=' Reply STOP to opt out or HELP for help.';
+  if (route !== 'emergency_accepted') return "TPS Plumbing Inc: Your emergency request has been sent to the office. You will receive confirmation when it is accepted. A visit has not been confirmed. Reply STOP to opt out or HELP for help.";
+  const raw=typeof acceptedBy==='string'?acceptedBy.trim():'';
+  const name=/\bedgar\b/i.test(raw)||/^j\.?\s*r\.?$/i.test(raw)?'JR':raw;
+  const attribution=/^[\p{L}\p{M}][\p{L}\p{M} .’'-]{0,49}$/u.test(name)?' by '+name:'';
+  return 'TPS Plumbing Inc: Your emergency message has been accepted'+attribution+'. You will be contacted if necessary. Office may reply by txt. Thank you for using TPS Emergency Services.'+footer;
 }
 async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now()) {
-  const {eventId, recipient, route, issuedAt, inboundHash, inboundAt, replyId} = input || {};
+  const {eventId, recipient, route, issuedAt, inboundHash, inboundAt, replyId, acceptedBy} = input || {};
   const manual=route==='staff_reply', reply=typeof input?.text==='string'?input.text.trim():'';
   if(manual&&(!reply||reply.length>1200||!/^[A-Za-z0-9_-]{6,80}$/.test(replyId||'')))return {status:'invalid'};
   if (!/^[A-Za-z0-9_-]{8,100}$/.test(eventId || '') ||
@@ -56,14 +57,14 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
     matchingId:rows.some(row=>ids(row).includes(eventId)),
     matchingSender:rows.some(row=>number(row.from)===recipient),
     matchingOffice:rows.some(row=>(Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE)),
-    emergencyFound:rows.some(row=>isEmergency(messageText(row))),fingerprintMatches:matching.length
+    emergencyFound:rows.some(row=>isEmergency(messageText(row))),fingerprintMatches:matching.length,templateVersion:2
   };
   if (!original || (!manual&&!isEmergency(messageText(original))) ||
       /^\s*reminder:\s*work order\b/i.test(messageText(original))) return {status:'inbound_unverified'};
   const keyword = rows.map(messageText).find(text=>STOP.test(text)||START.test(text));
   if (STOP.test(keyword || '')) return {status:'opted_out'};
   if (!keyword && (rows.length>=500 || Number(history.total)>rows.length)) return {status:'consent_history_incomplete'};
-  await send(path,{from:OFFICE,to:[recipient],text:manual?'TPS Plumbing Inc: '+reply+' Reply STOP to opt out or HELP for help.':acknowledgment(route),tag:manual?'tps-staff-'+replyId:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
+  await send(path,{from:OFFICE,to:[recipient],text:manual?'TPS Plumbing Inc: '+reply+' Reply STOP to opt out or HELP for help.':acknowledgment(route,acceptedBy),tag:manual?'tps-staff-'+replyId:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
   return {status:'accepted'};
 }
 function registerEmergencySms(receiver, options={}) {
