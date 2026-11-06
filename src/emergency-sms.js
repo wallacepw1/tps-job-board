@@ -42,6 +42,13 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
   const rows = history.items;
   const original = rows.find(row=>ids(row).includes(eventId) &&
     number(row.from)===recipient && (Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE));
+  if (input.diagnostic === true) return {
+    status:'diagnostic',count:rows.length,fields:Object.keys(rows[0]||{}),
+    matchingId:rows.some(row=>ids(row).includes(eventId)),
+    matchingSender:rows.some(row=>number(row.from)===recipient),
+    matchingOffice:rows.some(row=>(Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE)),
+    emergencyFound:rows.some(row=>isEmergency(messageText(row)))
+  };
   if (!original || !isEmergency(messageText(original)) ||
       /^\s*reminder:\s*work order\b/i.test(messageText(original))) return {status:'inbound_unverified'};
   const keyword = rows.map(messageText).find(text=>STOP.test(text)||START.test(text));
