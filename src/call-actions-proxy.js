@@ -3,6 +3,7 @@ const {createHmac,timingSafeEqual}=require('node:crypto');
 const {parseRef,presentJobFiles,FILES_ACTION,FILES_VIDEO_TEST_ACTION,openFilesModal}=require('./job-files');
 const desc=require('./desc-modal');
 const cancellation=require('./cancellation-review');
+const appfolioSchedule=require('./appfolio-schedule');
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 function verifySlackRequest(raw,headers,secret,now=Date.now()){
  const ts=headers['x-slack-request-timestamp'],signature=headers['x-slack-signature'];
@@ -65,6 +66,16 @@ function registerCallActionsProxy(receiver,options={}){
      const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN;
      await require('./job-files').slackApi(payload.view?.id?'views.update':'views.open',payload.view?.id?{view_id:payload.view.id,view:cancellation.resultView(e.message)}:{trigger_id:payload.trigger_id,view:cancellation.resultView(e.message)},token,options.fetch||global.fetch).catch(()=>{});
     }
+    return;
+   }
+   // "Pick AppFolio time" on a call card: read tenant windows from AppFolio and book the one an admin picks.
+   if(appfolioSchedule.intercepts(payload)){
+    if(payload.type==='view_submission'){
+     const error=appfolioSchedule.submissionError(payload);
+     if(error){res.status(200).json({response_action:'errors',errors:{window:error}});return;}
+     res.status(200).json({response_action:'update',view:appfolioSchedule.infoView('AppFolio scheduling',':hourglass_flowing_sand: Booking in AppFolio… This takes about a minute. Please do not submit again.')});
+    }else res.status(200).send('');
+    appfolioSchedule.route(payload,options).catch(e=>console.error('appfolio schedule',e.message));
     return;
    }
    // Files button on a TPS Bot card: open the files pop-up here, without a Latenode run.
