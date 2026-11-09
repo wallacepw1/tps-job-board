@@ -24,7 +24,8 @@ function validSignature(raw, signature, secret) {
 }
 function acknowledgment(route, acceptedBy) {
   const footer=' Reply STOP to opt out or HELP for help.';
-  if (route !== 'emergency_accepted') return "TPS Plumbing Inc: Your emergency request has been sent to the office. You will receive confirmation when it is accepted. A visit has not been confirmed. Reply STOP to opt out or HELP for help.";
+  // Business hours (office_emergency) -> office; after hours (emergency) -> on-call plumber (Paul 2026-11-09).
+  if (route !== 'emergency_accepted') return 'TPS Plumbing Inc: Your emergency request has been sent to '+(route==='emergency'?'our on-call plumber':'the office')+'. You will receive confirmation when it is accepted. A visit has not been confirmed.'+footer;
   const raw=typeof acceptedBy==='string'?acceptedBy.trim():'';
   const name=/\bedgar\b/i.test(raw)||/^j\.?\s*r\.?$/i.test(raw)?'JR':raw;
   const attribution=/^[\p{L}\p{M}][\p{L}\p{M} .’'-]{0,49}$/u.test(name)?' by '+name:'';
