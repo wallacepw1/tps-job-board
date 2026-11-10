@@ -110,3 +110,46 @@ test('results show recommendations, leave out suppliers without the item, and na
   assert.match(text, /Not checked yet: Home Depot, Lowe/);
   assert.match(text, /Reece[^"]*account login required/);
 });
+
+test('web prices keep only https links on the store site and name stores not found', () => {
+  const { normalizeWebPrices } = require('../src/price-search-client');
+  const out = normalizeWebPrices({ role: 'web_prices', ok: true, prices: [
+    { supplier: 'supplyhouse', item: 1, product: 'Watts 2 in PRV', price: 1403.08, url: 'https://www.supplyhouse.com/Watts-0009465' },
+    { supplier: 'homedepot', item: 1, price: 99, url: 'https://evil.example.com/homedepot.com' },
+    { supplier: 'lowes', item: 1, price: 0, url: 'https://www.lowes.com/pd/1' },
+    { supplier: 'voomisupply', item: 1, price: '1930.82', url: 'http://voomisupply.com/x' },
+  ] }, ['supplyhouse', 'homedepot', 'lowes', 'voomisupply']);
+  assert.equal(out.prices.length, 1);
+  assert.equal(out.prices[0].store, 'SupplyHouse');
+  assert.deepEqual(out.notFound, ['homedepot', 'lowes', 'voomisupply']);
+  assert.equal(normalizeWebPrices({ ok: false }).ok, false);
+});
+
+test('a search shows web prices even when the PC price search is not connected', async () => {
+  resetPriceSearchSessions();
+  const calls = [];
+  const webCalls = [];
+  const client = {
+    config: { identifyConfigured: true, bridgeConfigured: false },
+    async identify() { return normalizeIdentify(COMPLETE); },
+    async webPrices(requestId, items, suppliers) {
+      webCalls.push({ requestId, items, suppliers });
+      return { ok: true, prices: [{ supplier: 'supplyhouse', store: 'SupplyHouse', item: 1, product: 'Zurn 2-720A', price: 512.4, unit: 'ea', url: 'https://www.supplyhouse.com/Zurn-2-720A', stockNote: 'In Stock' }], notFound: ['homedepot', 'lowes'], note: null };
+    },
+  };
+  const options = { enabled: true, token: 'xoxb-assistant', fetch: slackFetch(calls), schedule: () => () => {}, bridge: null, bridgeConfigured: false, client };
+  const opened = handlePriceSearch({ type: 'block_actions', team: { id: TEAM }, user: { id: ADMIN }, trigger_id: 'trig', actions: [{ action_id: 'tps_price_search_open' }] }, options);
+  await opened.follow;
+  const session = JSON.parse(calls[0].body.view.private_metadata).s;
+  const submitted = handlePriceSearch({ type: 'view_submission', team: { id: TEAM }, user: { id: ADMIN }, view: { id: 'VPRICE', callback_id: 'tps_price_search_form', private_metadata: JSON.stringify({ s: session }), state: { values: { ps_desc: { desc: { value: 'Zurn 720A 2 inch' } }, ps_category: { category: { selected_option: { value: 'general' } } }, ps_qty: { qty: { value: '1' } } } } } }, options);
+  await submitted.follow;
+  assert.equal(webCalls.length, 1);
+  assert.equal(webCalls[0].items[0].model, '2-720A');
+  assert.ok(webCalls[0].suppliers.includes('masterbuildermercantile'));
+  const text = JSON.stringify(calls.at(-1).body.view);
+  assert.match(text, /Web prices/);
+  assert.match(text, /SupplyHouse\*: \$512\.40 ea/);
+  assert.match(text, /Not found online: Home Depot, Lowe/);
+  assert.match(text, /not your account price/);
+  assert.match(text, /Account prices \(Reece, Winsupply\) are not connected yet/);
+});

@@ -153,6 +153,34 @@ function recommendationBlocks(presented) {
   ];
 }
 
+// Public listed prices from web search. Never the company's account price.
+function webPriceBlocks(presented) {
+  const web = presented.webPrices;
+  if (!web || (!web.prices?.length && !web.notFound?.length)) return [];
+  const items = presented.webItems || [];
+  const many = items.length > 1;
+  const money = value => `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const lines = (web.prices || []).map(item => {
+    const link = String(item.url).replace(/[|<> ]/g, encodeURIComponent);
+    const named = items[item.item - 1];
+    const what = many ? ` (for ${esc(named?.title || [named?.brand, named?.model].filter(Boolean).join(' ') || `item ${item.item}`)})` : '';
+    const bits = [`*${esc(item.store)}*: ${money(item.price)}${item.unit ? ` ${esc(item.unit)}` : ''}${what}`];
+    if (item.product) bits.push(esc(item.product));
+    if (item.stockNote) bits.push(esc(item.stockNote));
+    bits.push(`<${link}|View>`);
+    return bits.join(' · ');
+  });
+  const { WEB_STORES } = require('./price-search-client');
+  const missing = (web.notFound || []).map(id => WEB_STORES[id]?.name).filter(Boolean);
+  if (missing.length) lines.push(`Not found online: ${missing.map(esc).join(', ')}.`);
+  if (!lines.length) return [];
+  return [
+    { type: 'header', block_id: 'ps_h_web', text: plain('Web prices') },
+    { type: 'section', block_id: 'ps_web', text: { type: 'mrkdwn', text: clip(lines.join('\n'), 2900) } },
+    { type: 'context', block_id: 'ps_web_note', elements: [{ type: 'mrkdwn', text: 'Public listed prices found by web search, not your account price. They may be out of date. Check the link before buying.' }] },
+  ];
+}
+
 function statusView(sessionId, level, message) {
   return shell(sessionId, 'Price search', [
     { type: 'alert', block_id: 'ps_status', level, text: { type: 'mrkdwn', text: clip(message, 200) } },
@@ -257,6 +285,7 @@ function resultsView(sessionId, presented, now = new Date()) {
     ...(presented.liveNotice ? [{ type: 'alert', block_id: 'ps_live', level: 'warning', text: { type: 'mrkdwn', text: clip(presented.liveNotice, 200) } }] : []),
     { type: 'section', block_id: 'ps_query', text: { type: 'mrkdwn', text: clip(presented.summary, 2900) } },
     ...recommendationBlocks(presented),
+    ...webPriceBlocks(presented),
   ];
   const groups = [['exact', 'Exact matches'], ['equivalent', 'Candidate equivalents'], ['verify', 'Needs verification']];
   let index = 0;

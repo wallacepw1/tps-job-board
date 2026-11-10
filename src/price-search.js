@@ -4,7 +4,7 @@
 const { randomUUID } = require('node:crypto');
 const { ADMINS } = require('./assignment-policy');
 const { slackApi } = require('./job-files');
-const { createPriceClient, publicStatus, buildRequest } = require('./price-search-client');
+const { createPriceClient, publicStatus, buildRequest, WEB_STORES } = require('./price-search-client');
 const { getPriceBridge } = require('./price-bridge');
 const { validateResult, adaptCollectorResult } = require('./price-contract');
 const { intentFrom, normModel, classifyCandidate, brandRank, supplierIdsFor, effectiveCategory, supplierName, HEATER_EXCLUDED } = require('./price-search-policy');
@@ -154,9 +154,12 @@ function presentResult(input, result) {
   for (const bucket of [groups.exact, groups.equivalent, groups.verify]) bucket.sort((a, b) => brandRank(a) - brandRank(b));
   // A supplier whose search had no match is left out. A supplier that was not checked is named once.
   const notChecked = [];
+  const webAsked = new Set(input.webAsked || []);
   const errors = (result.supplierErrors || []).filter(error => {
     const name = supplierName(error.supplierId)?.name || error.supplierId || 'Supplier';
     if (SEARCH_MISS.test(error.message || '')) return false;
+    // Stores covered by the web price lookup are shown there instead.
+    if (webAsked.has(error.supplierId) || webAsked.has(supplierName(error.supplierId)?.id)) return false;
     if (['not_executed', 'not_configured', 'execution_disabled', 'result_selectors_not_configured', 'search_address_not_configured'].includes(error.code)) { if (!notChecked.includes(name)) notChecked.push(name); return false; }
     return true;
   }).map(error => {
@@ -182,7 +185,7 @@ function presentResult(input, result) {
     const at = key ? [...new Set(candidates.filter(c => c.observed && [c.model, c.partNumber, c.title].some(v => normModel(v).includes(key))).map(c => supplierName(c.supplierId)?.name).filter(Boolean))] : [];
     if (at.length) foundBy[name] = at.join(', ');
   }
-  return { recommendations: input.recommendations || [], foundBy, groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, heldRows, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'A signed-in price is shown only on the live page that was captured.' };
+  return { recommendations: input.recommendations || [], webPrices: input.webPrices || null, webItems: input.webItems || [], foundBy, groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, heldRows, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'A signed-in price is shown only on the live page that was captured.' };
 }
 
 async function defaultPhoto(file, token, fetch) {
@@ -328,6 +331,7 @@ async function identifyAndQueue(session, generation, ctx, payload, answers) {
   } else identifyNote = 'Model identification is not connected. No identified specs were added.';
   payload.identifyNote = identifyNote;
   delete payload.photoBytes;
+  startWebPrices(session, ctx, payload);
   if (!ctx.bridgeConfigured) return finish(session, generation, ctx, payload, { status: 'unconfigured' });
   const request = buildRequest(payload);
   const queued = ctx.bridge.enqueue(request, payload.enrichment);
@@ -363,6 +367,31 @@ function applyIdentified(payload, identified, answers) {
   if (answers.length && payload.description) payload.description = `${payload.description}\n${answers.map(item => `${item.question}: ${item.answer}`).join('\n')}`.slice(0, 500);
 }
 
+// Stores that block the collector are priced from public web listings, in parallel with the PC search.
+function webItemsFor(payload) {
+  const items = [];
+  for (const item of payload.recommendations || []) {
+    const model = item.partNumber || item.model;
+    if (!model && !item.title) continue;
+    items.push({ brand: item.brand || '', model: model || '', title: item.title || '' });
+    if (items.length === 2) break;
+  }
+  const id = payload.identified;
+  if (!items.length && id && (id.model || id.partNumber || id.title)) items.push({ brand: id.brand || '', model: [id.model || id.partNumber, id.size].filter(Boolean).join(' '), title: id.title || '' });
+  return items;
+}
+
+function startWebPrices(session, ctx, payload) {
+  if (typeof ctx.client.webPrices !== 'function' || !ctx.client.config.identifyConfigured) return;
+  const items = webItemsFor(payload);
+  if (!items.length) return;
+  const heater = effectiveCategory(payload) === 'heater';
+  const asked = Object.keys(WEB_STORES).filter(id => !(heater && HEATER_EXCLUDED.includes(id)));
+  payload.webItems = items;
+  payload.webAsked = asked;
+  session.webPrices = Promise.resolve(ctx.client.webPrices(payload.requestId || session.id, items, asked)).catch(() => null);
+}
+
 function readAnswers(view, questions) {
   const values = view?.state?.values || {};
   return questions.map((question, index) => {
@@ -376,6 +405,11 @@ function readAnswers(view, questions) {
 async function finish(session, generation, ctx, payload, result) {
   session.cancel?.();
   session.cancel = null;
+  if (session.webPrices) {
+    const pending = session.webPrices;
+    session.webPrices = null;
+    payload.webPrices = await pending;
+  }
   if (session.closed || session.generation !== generation || !session.viewId) return;
   if (result.status === 'closed') return;
   await ctx.update(session.viewId, viewFor(session, payload, result, ctx.now()));
@@ -390,11 +424,19 @@ function pause(session, ms, schedule) {
   });
 }
 
+// The PC checks for work every few seconds. A job nobody picks up in this time means the PC is off.
+const UNCLAIMED_MS = 45 * 1000;
+
 async function pollBridge(session, generation, jobId, ctx) {
-  const deadline = ctx.now().getTime() + 10 * 60 * 1000;
+  const started = ctx.now().getTime();
+  const deadline = started + 10 * 60 * 1000;
   while (ctx.now().getTime() < deadline) {
     if (session.closed || session.generation !== generation) return { status: 'closed' };
     const job = ctx.bridge.get(jobId);
+    if (job.status === 'queued' && ctx.now().getTime() - started > UNCLAIMED_MS) {
+      ctx.bridge.cancel?.(jobId);
+      return { status: 'error', error: { message: 'The price PC did not pick up the search. It may be off or the collector is not running.', retryable: true } };
+    }
     if (job.status === 'complete') {
       const checked = validateResult(job.result);
       if (!checked.ok || checked.endpointRejected) return { status: 'error', error: { message: 'Supplier result did not match the price contract. No prices are shown.' } };
@@ -408,6 +450,14 @@ async function pollBridge(session, generation, jobId, ctx) {
 }
 
 function viewFor(session, input, result, now) {
+  // Web prices can still be shown when the PC search is not connected or failed.
+  if (result.status !== 'complete' && result.status !== 'disabled' && input.webPrices?.prices?.length) {
+    const reason = result.status === 'unconfigured' ? 'Account prices (Reece, Winsupply) are not connected yet.' : `Account prices: ${safeText(result.error?.message) || 'the PC search did not finish.'}`;
+    const presented = presentResult(input, { contractVersion: 'tps-price-v1', priceRows: [], candidates: [], supplierErrors: [], collector: {} });
+    presented.errors = [reason, ...presented.errors];
+    presented.searchedAt = presented.searchedAt || now.toISOString();
+    return resultsView(session.id, presented, now);
+  }
   if (result.status === 'unconfigured' || result.status === 'disabled') return statusView(session.id, 'warning', 'Supplier price bridge is not connected. No prices are shown.');
   if (result.status !== 'complete') return statusView(session.id, 'error', safeText(result.error?.message) || 'Price search could not be completed. You can search again.');
   const presented = presentResult(input, result);
