@@ -39,3 +39,9 @@ test('submit books the picked window and logs it in the Incoming thread',async()
  assert.equal(log[2][1].thread_ts,'1794241637.318289');
 });
 test('submit without a pick is rejected before AppFolio',()=>{assert.ok(af.submissionError({view:{private_metadata:JSON.stringify(call),state:{values:{}}}}));});
+test('reads the Latenode reply shape (stringified slots, "null" fields)',async()=>{
+ const log=[];const f=Date.now()+86400000;const reply={status:'options',step:'null',appointment:'null',slots:JSON.stringify([{id:'timeslot-9',label:'Tue',start:f,end:f+3600000}])};
+ const fetch=async(url,opts)=>{if(url.includes('tps-appfolio-schedule-picker'))return{ok:true,text:async()=>JSON.stringify(reply)};const m=url.split('/').pop();log.push([m,JSON.parse(opts.body)]);return{json:async()=>({ok:true,view:{id:'V1'}})};};
+ await af.route({type:'block_actions',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},trigger_id:'t',actions:[{action_id:af.ACTION,value:JSON.stringify(call)}],message:{ts:'9.9',blocks:[]}},{fetch,TPS_BOT_TOKEN:'x',key:'k'});
+ assert.equal(log[1][1].view.callback_id,af.CALLBACK);
+});

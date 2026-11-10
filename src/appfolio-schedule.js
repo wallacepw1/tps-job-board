@@ -45,6 +45,10 @@ async function callPicker(body,{key=process.env.TPS_INTERNAL_KEY,fetch:fetcher=g
  const r=await fetcher(PICKER,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,...body}),signal:AbortSignal.timeout(110000)});
  const text=await r.text();let out;try{out=JSON.parse(text);if(typeof out==='string')out=JSON.parse(out);}catch{out=null;}
  if(!r.ok||!out||typeof out.status!=='string')throw Error('AppFolio could not be checked right now.');
+ // Latenode's webhook reply stringifies each field: slots arrives as a JSON string and missing fields as "null".
+ for(const k of ['step','appointment'])if(out[k]==='null'||out[k]==null)out[k]='';
+ if(typeof out.slots==='string'){try{out.slots=JSON.parse(out.slots);}catch{out.slots=[];}}
+ if(!Array.isArray(out.slots))out.slots=[];
  return out;
 }
 
