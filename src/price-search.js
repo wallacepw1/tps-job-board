@@ -86,6 +86,14 @@ function specNumbers(specs) {
   };
 }
 
+function rowSourceFor(row, candidates, collector) {
+  const supplier = row.supplierId || row.supplier;
+  const mine = candidates.filter(item => item.supplierId === supplier);
+  const blocked = mine.find(item => ['fixture', 'supplied_observation', 'candidate_hint', 'not_collected'].includes(item.evidenceKind));
+  const evidenceKind = blocked ? blocked.evidenceKind : (collector.evidenceKind === 'live_dom' ? null : (collector.evidenceKind || null));
+  return { linked: collector.linked === true, liveRun: collector.liveRun === true, httpEndpoint: collector.httpEndpoint ?? null, evidenceKind };
+}
+
 function rowsFor(candidate, rows) {
   if (candidate.evidenceKind !== 'live_dom' || !candidate.supplierId) return [];
   return rows.filter(row => (row.supplierId || row.supplier) === candidate.supplierId);
@@ -144,7 +152,7 @@ function presentResult(input, result) {
   const unknowns = (input.enrichment?.unknowns || []).map(item => `${item}: unknown`);
   const summary = [understoodLine(intent), input.identifyNote, category === 'heater' ? 'SupplyHouse and MBM are excluded for this heater search. WinSupply of South San Diego (National City) stays included.' : `Suppliers: ${supplierIdsFor(category).join(', ')}.`, ...unknowns, ...hypotheses].filter(Boolean).join('\n');
   const liveSuppliers = new Set(candidates.filter(item => item.evidenceKind === 'live_dom').map(item => item.supplierId));
-  const heldRows = rows.filter(row => !liveSuppliers.has(row.supplierId || row.supplier));
+  const heldRows = rows.filter(row => !liveSuppliers.has(row.supplierId || row.supplier)).map(row => ({ row, source: rowSourceFor(row, candidates, collector) }));
   const liveNotice = candidates.some(item => item.observed) ? null : 'Not a live supplier check. Prices stay not_validated.';
   return { groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, heldRows, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'A signed-in price is shown only on the live page that was captured.' };
 }

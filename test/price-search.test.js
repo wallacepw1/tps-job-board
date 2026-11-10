@@ -119,6 +119,10 @@ test('null and unproven prices never become amounts', () => {
   assert.doesNotMatch(signed, /verified_account_net|Account net/);
   const fixtureJob = { linked: true, liveRun: true, evidenceKind: 'fixture', httpEndpoint: null };
   assert.doesNotMatch(priceLines({ supplierId: 'supplyhouse', price: '88.00', priceKind: 'authenticated_unknown', guaranteedStock: false }, fixtureJob).join(' '), /88\.00/);
+  const member = priceLines({ supplierId: 'supplyhouse', price: '88.00', rawPriceText: '88.00', priceKind: 'authenticated_unknown', currency: 'USD', uom: 'each', guaranteedStock: false }, { linked: true, liveRun: true, evidenceKind: null, httpEndpoint: null }).join(' ');
+  assert.match(member, /Signed-in price; net status unverified/);
+  assert.match(member, /88\.00/);
+  assert.doesNotMatch(member, /login_required|Account net|verified_account_net/);
   assert.doesNotMatch(priceLines({ supplierId: 'supplyhouse', price: '41.00', priceKind: 'list', guaranteedStock: false }, live).join(' '), /41\.00/);
   const liveStock = stockLines({ availability: { network: 'In Network (4)', needsConfirmation: true, guaranteedStock: false, availableToOrder: true } }, live).join(' ');
   assert.match(liveStock, /unconfirmed/);

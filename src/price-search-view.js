@@ -127,8 +127,10 @@ function priceLines(row, source) {
   const live = pageIsLive(source);
   const hasAmount = typeof row.price === 'string' && row.price.trim();
   if (account && (kind === 'public' || kind === 'list')) return ['Guest price is not shown. login_required.'];
+  const notLiveRow = ['fixture', 'supplied_observation', 'candidate_hint', 'not_collected'].includes(source?.evidenceKind);
   if (account && kind === 'authenticated_unknown') {
-    if (live && hasAmount) return [`Signed-in price; net status unverified. ${moneyTail(row)}`];
+    if (hasAmount && !notLiveRow && source?.linked !== false && source?.liveRun !== false && source?.httpEndpoint == null) return [`Signed-in price; net status unverified. ${moneyTail(row)}`];
+    if (notLiveRow) return ['not_validated. This row is not a live capture.'];
     return ['login_required. Signed-in price was not observed on a live page. not_validated.'];
   }
   if (account && kind !== 'verified_account_net') return ['login_required. Signed-in price was not observed on a live page. not_validated.'];
@@ -213,7 +215,7 @@ function resultsView(sessionId, presented, now = new Date()) {
   if (!presented.groups.exact.length && !presented.groups.equivalent.length && !presented.groups.verify.length) {
     blocks.push({ type: 'section', block_id: 'ps_empty', text: { type: 'mrkdwn', text: 'No exact, equivalent, or unverified candidate was returned.' } });
   }
-  if (presented.heldRows?.length) blocks.push({ type: 'section', block_id: 'ps_held', text: { type: 'mrkdwn', text: clip(presented.heldRows.map(row => supplierLine(row, { linked: false, liveRun: false, evidenceKind: 'not_collected', httpEndpoint: null })).join('\n\n'), 2900) } });
+  if (presented.heldRows?.length) blocks.push({ type: 'section', block_id: 'ps_held', text: { type: 'mrkdwn', text: clip(presented.heldRows.map(item => supplierLine(item.row, item.source)).join('\n\n'), 2900) } });
   if (presented.errors?.length) blocks.push({ type: 'section', block_id: 'ps_errors', text: { type: 'mrkdwn', text: clip(presented.errors.map(error => `• ${esc(error)}`).join('\n'), 2900) } });
   if (presented.groups.rejected.length) {
     blocks.push({ type: 'header', block_id: 'ps_h_rejected', text: plain('Not a match') });
