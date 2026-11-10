@@ -81,6 +81,26 @@ test('gallon keyword, electric, and smaller gas heaters are not commercial 120k 
   assert.match(view, /Installer approval is not granted/);
 });
 
+test('a live page does not make another row look live, and a signed-in account price is not called net', () => {
+  const collector = { linked: true, liveRun: true, evidenceKind: 'live_dom', httpEndpoint: null, bridge: 'outbound_mac_worker' };
+  const result = presentResult({ description: 'commercial 80 gallon 120k natural gas', categoryHint: 'water_heater' }, {
+    collector,
+    candidates: [
+      { title: 'Live 80 gallon 120000 BTU natural gas metal', model: 'LIVE-1', supplierId: 'winsupply', evidenceKind: 'live_dom', matchClass: 'exact', filterPass: true, comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' } },
+      { title: 'Saved 80 gallon 120000 BTU natural gas metal', model: 'FIX-1', supplierId: 'winsupply', evidenceKind: 'supplied_observation', matchClass: 'exact', filterPass: true, comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' } },
+    ],
+    priceRows: [{ supplierId: 'winsupply', price: '88.00', priceKind: 'authenticated_unknown', currency: 'USD', uom: 'each', guaranteedStock: false, freshness: { observedAt: '2026-11-09T00:00:00Z' } }, { supplierId: 'supplyhouse', price: '41.00', priceKind: 'public', guaranteedStock: false }],
+  });
+  const view = JSON.stringify(resultsView('session-2', result));
+  assert.match(view, /Signed-in price; net status unverified/);
+  assert.match(view, /88\.00/);
+  assert.doesNotMatch(view, /Account net|verified_account_net/);
+  const fixture = view.split('FIX-1')[1] || '';
+  assert.doesNotMatch(fixture, /88\.00/);
+  assert.match(fixture, /not_validated/);
+  assert.doesNotMatch(view, /41\.00/);
+});
+
 test('null and unproven prices never become amounts', () => {
   const live = { linked: true, liveRun: true, evidenceKind: 'live_dom', httpEndpoint: null };
   assert.match(priceLines({ price: null, priceKind: 'not_configured' }, { linked: false }).join(' '), /not_validated/);
@@ -92,6 +112,14 @@ test('null and unproven prices never become amounts', () => {
   assert.doesNotMatch(priceLines({ supplierId: 'winsupply', price: '$5,670.79', priceKind: 'public', guaranteedStock: false }, live).join(' '), /5,670/);
   assert.match(priceLines({ supplierId: 'winsupply', price: '$5,670.79', priceKind: 'public', guaranteedStock: false }, live).join(' '), /login_required/);
   assert.match(priceLines({ supplierId: 'masterbuildermercantile', price: '10.00', priceKind: 'unsupported', guaranteedStock: false }, live).join(' '), /not_validated/);
+  assert.doesNotMatch(priceLines({ supplierId: 'masterbuildermercantile', price: '10.00', priceKind: 'unsupported', guaranteedStock: false }, live).join(' '), /10\.00/);
+  const signed = priceLines({ supplierId: 'winsupply', price: '88.00', priceKind: 'authenticated_unknown', currency: 'USD', uom: 'each', freshness: { observedAt: '2026-11-09T00:00:00Z' }, guaranteedStock: false }, live).join(' ');
+  assert.match(signed, /Signed-in price; net status unverified/);
+  assert.match(signed, /88\.00/);
+  assert.doesNotMatch(signed, /verified_account_net|Account net/);
+  const fixtureJob = { linked: true, liveRun: true, evidenceKind: 'fixture', httpEndpoint: null };
+  assert.doesNotMatch(priceLines({ supplierId: 'supplyhouse', price: '88.00', priceKind: 'authenticated_unknown', guaranteedStock: false }, fixtureJob).join(' '), /88\.00/);
+  assert.doesNotMatch(priceLines({ supplierId: 'supplyhouse', price: '41.00', priceKind: 'list', guaranteedStock: false }, live).join(' '), /41\.00/);
   const liveStock = stockLines({ availability: { network: 'In Network (4)', needsConfirmation: true, guaranteedStock: false, availableToOrder: true } }, live).join(' ');
   assert.match(liveStock, /unconfirmed/);
   assert.match(liveStock, /Available to order — not stock/);

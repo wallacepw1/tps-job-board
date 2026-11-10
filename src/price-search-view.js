@@ -111,35 +111,39 @@ function statusView(sessionId, level, message) {
   ]);
 }
 
-function liveCapture(collector) {
-  return collector?.linked === true && collector?.liveRun === true && collector?.evidenceKind === 'live_dom' && collector?.httpEndpoint == null;
+function pageIsLive(source) {
+  return source?.linked === true && source?.liveRun === true && source?.evidenceKind === 'live_dom' && source?.httpEndpoint == null;
 }
 
-function livePrice(row, collector) {
-  const kind = String(row.priceKind || '');
-  return liveCapture(collector) && ['verified_account_net', 'public', 'list'].includes(kind) && typeof row.price === 'string' && row.price.trim();
+function moneyTail(row) {
+  const shown = row.rawPriceText ? esc(row.rawPriceText) : esc(row.price);
+  return `${shown} · ${esc(row.currency || 'currency unknown')} · ${esc(row.uom || 'unit unknown')} · ${esc(row.freshness?.observedAt || 'time unknown')}`;
 }
 
-function priceLines(row, collector) {
+function priceLines(row, source) {
   const kind = String(row.priceKind || '');
   const { ACCOUNT_PRICE_SUPPLIERS } = require('./price-search-policy');
   const account = ACCOUNT_PRICE_SUPPLIERS.includes(row.supplierId);
-  if (account && kind !== 'verified_account_net') return ['login_required. Account price not_validated. Guest price is not shown.'];
-  if (account && !liveCapture(collector)) return ['not_validated. Account price is not shown until a live signed-in check.'];
-  if (!livePrice(row, collector)) {
-    if (kind === 'authenticated_unknown') return ['login_required. Account price not_validated. Not a confirmed net price.'];
-    if (kind === 'unsupported') return ['unsupported. login_required. Price not_validated.'];
-    if (kind === 'not_configured' || collector?.linked === false) return ['not_validated. Price unknown. Collector is not linked.'];
+  const live = pageIsLive(source);
+  const hasAmount = typeof row.price === 'string' && row.price.trim();
+  if (account && (kind === 'public' || kind === 'list')) return ['Guest price is not shown. login_required.'];
+  if (account && kind === 'authenticated_unknown') {
+    if (live && hasAmount) return [`Signed-in price; net status unverified. ${moneyTail(row)}`];
+    return ['login_required. Signed-in price was not observed on a live page. not_validated.'];
+  }
+  if (account && kind !== 'verified_account_net') return ['login_required. Signed-in price was not observed on a live page. not_validated.'];
+  if (!live || !hasAmount || !['verified_account_net', 'public', 'list'].includes(kind)) {
+    if (kind === 'authenticated_unknown') return ['Not a confirmed net price.'];
+    if (kind === 'unsupported') return ['unsupported. Price not_validated.'];
+    if (kind === 'not_configured' || source?.linked === false) return ['not_validated. Price unknown. Collector is not linked.'];
     return ['not_validated. Price unknown.'];
   }
   const name = kind === 'list' ? 'Factory list' : kind === 'verified_account_net' ? 'Account net' : 'Displayed price';
-  const shown = row.rawPriceText ? esc(row.rawPriceText) : esc(row.price);
-  const when = row.freshness?.observedAt || 'time unknown';
-  return [`${name} ${shown} · ${esc(row.currency || 'currency unknown')} · ${esc(row.uom || 'unit unknown')} · ${esc(when)}`];
+  return [`${name} ${moneyTail(row)}`];
 }
 
-function stockLines(row, collector) {
-  if (!liveCapture(collector)) return ['Stock not_validated. Not a live check.'];
+function stockLines(row, source) {
+  if (!pageIsLive(source)) return ['Stock not_validated. Not a live check.'];
   const lines = [];
   const availability = row.availability || {};
   const branches = Array.isArray(row.otherBranches) ? row.otherBranches : [];
@@ -162,10 +166,14 @@ function stockLines(row, collector) {
   return lines;
 }
 
-function supplierLine(row, collector) {
+function supplierLine(row, source) {
   const known = supplierName(row.supplierId || row.supplier);
   const name = known ? known.name : 'Unknown supplier';
-  return `*${esc(name)}*\n${[...priceLines(row, collector), ...stockLines(row, collector)].join('\n')}`;
+  return `*${esc(name)}*\n${[...priceLines(row, source), ...stockLines(row, source)].join('\n')}`;
+}
+
+function rowSource(item) {
+  return { linked: item.collector?.linked === true, liveRun: item.collector?.liveRun === true, httpEndpoint: item.collector?.httpEndpoint ?? null, evidenceKind: item.evidenceKind || null };
 }
 
 function productBlocks(item, index) {
@@ -182,7 +190,8 @@ function productBlocks(item, index) {
   if (image && !item.illustrative) card.hero_image = { type: 'image', image_url: image.url, alt_text: image.alt };
   const notes = [...(item.differences || []), ...(item.reasons || [])];
   if (!image) notes.unshift('No product image from the supplier.');
-  const blocks = [card, { type: 'section', block_id: `ps_price_${index}`, text: { type: 'mrkdwn', text: clip((item.rows || []).map(row => supplierLine(row, item.collector)).join('\n\n') || 'No supplier rows were returned.', 2900) } }];
+  const priceText = item.observed ? ((item.rows || []).map(row => supplierLine(row, rowSource(item))).join('\n\n') || 'No supplier rows were returned.') : 'Price and stock not_validated. This page is not live evidence.';
+  const blocks = [card, { type: 'section', block_id: `ps_price_${index}`, text: { type: 'mrkdwn', text: clip(priceText, 2900) } }];
   if (notes.length) blocks.splice(1, 0, { type: 'section', block_id: `ps_notes_${index}`, text: { type: 'mrkdwn', text: clip(notes.map(note => `• ${esc(note)}`).join('\n'), 2900) } });
   return blocks;
 }
@@ -204,6 +213,7 @@ function resultsView(sessionId, presented, now = new Date()) {
   if (!presented.groups.exact.length && !presented.groups.equivalent.length && !presented.groups.verify.length) {
     blocks.push({ type: 'section', block_id: 'ps_empty', text: { type: 'mrkdwn', text: 'No exact, equivalent, or unverified candidate was returned.' } });
   }
+  if (presented.heldRows?.length) blocks.push({ type: 'section', block_id: 'ps_held', text: { type: 'mrkdwn', text: clip(presented.heldRows.map(row => supplierLine(row, { linked: false, liveRun: false, evidenceKind: 'not_collected', httpEndpoint: null })).join('\n\n'), 2900) } });
   if (presented.errors?.length) blocks.push({ type: 'section', block_id: 'ps_errors', text: { type: 'mrkdwn', text: clip(presented.errors.map(error => `• ${esc(error)}`).join('\n'), 2900) } });
   if (presented.groups.rejected.length) {
     blocks.push({ type: 'header', block_id: 'ps_h_rejected', text: plain('Not a match') });

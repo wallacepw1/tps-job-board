@@ -87,9 +87,8 @@ function specNumbers(specs) {
 }
 
 function rowsFor(candidate, rows) {
-  const supplier = candidate.supplierId;
-  const matched = supplier ? rows.filter(row => (row.supplierId || row.supplier) === supplier) : [];
-  return matched.length ? matched : rows.length === 1 ? rows : [];
+  if (candidate.evidenceKind !== 'live_dom' || !candidate.supplierId) return [];
+  return rows.filter(row => (row.supplierId || row.supplier) === candidate.supplierId);
 }
 
 function presentResult(input, result) {
@@ -97,7 +96,6 @@ function presentResult(input, result) {
   intent.modelKey = normModel(input.modelHint || input.partNumber);
   const category = effectiveCategory(input);
   const collector = result.collector || {};
-  const live = collector.linked === true && collector.liveRun === true && ['live_dom', 'supplied_observation'].includes(collector.evidenceKind) && collector.httpEndpoint == null;
   const rows = (result.priceRows || []).filter(row => {
     if (category !== 'heater') return true;
     const known = supplierName(row.supplierId || row.supplier);
@@ -120,6 +118,7 @@ function presentResult(input, result) {
       backendKind: raw.matchClass || raw.matchKind || raw.kind || '',
       differences: Array.isArray(raw.differences) ? raw.differences.map(String).slice(0, 6) : [],
       collector,
+      evidenceKind: raw.evidenceKind || null,
     };
     const judged = classifyCandidate(intent, item);
     const observed = raw.evidenceKind === 'live_dom' && collector.linked === true && collector.liveRun === true && collector.httpEndpoint == null;
@@ -127,7 +126,7 @@ function presentResult(input, result) {
     if ((kind === 'exact' || kind === 'equivalent') && !observed) kind = 'verify';
     const hypothesis = raw.evidenceKind === 'candidate_hint' || raw.evidenceKind == null;
     const unverified = !observed ? [`not_validated. ${hypothesis ? 'Input hypothesis is not product evidence.' : 'A manufacturer or product page spec was not collected.'}`] : [];
-    return { ...item, ...judged, kind, observed, rows: rowsFor({ ...item, supplierId: raw.supplierId }, rows), differences: [...item.differences, ...judged.tradeoffs, ...unverified, ...(illustrative ? ['Supplier illustration is not confirmed as this exact model.'] : []), ...(raw.evidenceKind === 'fixture' ? ['Fixture evidence is not a live product.'] : [])] };
+    return { ...item, ...judged, kind, observed, rows: rowsFor({ supplierId: raw.supplierId, evidenceKind: raw.evidenceKind }, rows), differences: [...item.differences, ...judged.tradeoffs, ...unverified, ...(illustrative ? ['Supplier illustration is not confirmed as this exact model.'] : []), ...(raw.evidenceKind === 'fixture' ? ['Fixture evidence is not a live product.'] : [])] };
   });
   const groups = { exact: [], equivalent: [], verify: [], rejected: [] };
   for (const item of candidates) {
@@ -144,8 +143,10 @@ function presentResult(input, result) {
   const hypotheses = (input.enrichment?.candidates || []).filter(item => item?.model).map(item => `Unverified hypothesis: ${item.model}. Not OEM-proven.`);
   const unknowns = (input.enrichment?.unknowns || []).map(item => `${item}: unknown`);
   const summary = [understoodLine(intent), input.identifyNote, category === 'heater' ? 'SupplyHouse and MBM are excluded for this heater search. WinSupply of South San Diego (National City) stays included.' : `Suppliers: ${supplierIdsFor(category).join(', ')}.`, ...unknowns, ...hypotheses].filter(Boolean).join('\n');
-  const liveNotice = live ? null : collector.evidenceKind === 'fixture' ? 'Fixture data is not a live supplier check. No prices are shown.' : 'Not a live supplier check. No prices are shown.';
-  return { groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'Prices appear only on a live collector result.' };
+  const liveSuppliers = new Set(candidates.filter(item => item.evidenceKind === 'live_dom').map(item => item.supplierId));
+  const heldRows = rows.filter(row => !liveSuppliers.has(row.supplierId || row.supplier));
+  const liveNotice = candidates.some(item => item.observed) ? null : 'Not a live supplier check. Prices stay not_validated.';
+  return { groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, heldRows, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'A signed-in price is shown only on the live page that was captured.' };
 }
 
 async function defaultPhoto(file, token, fetch) {
