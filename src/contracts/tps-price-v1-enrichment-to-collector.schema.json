@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tps-price-v1-enrichment-to-collector-request",
+  "title": "Map Latenode enrichment to collector request fields",
+  "description": "Pure mapping documentation + example. TPS server owns queue. candidateHints maxItems 20. identifiedSpecs values are strings|null per collector v3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fromEnrichment",
+    "toCollectorRequest"
+  ],
+  "properties": {
+    "fromEnrichment": {
+      "$ref": "tps-price-v1-latenode-enrichment#/$defs/enrichment"
+    },
+    "toCollectorRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "queryType",
+        "identifiedSpecs",
+        "candidateHints"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "queryType": {
+          "enum": [
+            "photo",
+            "model_text",
+            "part_number",
+            "description"
+          ]
+        },
+        "modelHint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "partNumber": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "categoryHint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matchPriority": {
+          "enum": [
+            "default",
+            "strict_size"
+          ]
+        },
+        "identifiedSpecs": {
+          "type": "object"
+        },
+        "candidateHints": {
+          "type": "array",
+          "maxItems": 20
+        },
+        "suppliers": {
+          "type": "array"
+        },
+        "uiSource": {
+          "const": "tps_assistant_app_home"
+        },
+        "mode": {
+          "enum": [
+            "plan",
+            "execute"
+          ]
+        }
+      }
+    }
+  }
+}

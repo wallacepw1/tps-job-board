@@ -1,0 +1,557 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tps-price-v1-latenode-enrichment",
+  "title": "TPS Latenode identification/enrichment v1",
+  "description": "Output of inactive DEV Latenode scenario role=identification_enrichment. No prices/stock/images. TPS server maps this into collector request identifiedSpecs/candidateHints then queues Mac outbound worker. No webhook URL/token belongs here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "role",
+    "requestId",
+    "status",
+    "ok",
+    "completed",
+    "enrichment",
+    "approvals",
+    "uiHints",
+    "missingPieces"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "tps-price-v1"
+    },
+    "role": {
+      "const": "identification_enrichment"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "completed_enrichment",
+        "error"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "completed": {
+      "type": "boolean"
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "isTest": {
+      "type": "boolean"
+    },
+    "matchPriority": {
+      "enum": [
+        "default",
+        "strict_size"
+      ]
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "enrichment": {
+      "$ref": "#/$defs/enrichment"
+    },
+    "identify": {
+      "description": "Alias of enrichment for older consumers",
+      "$ref": "#/$defs/enrichment"
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/candidateHypothesis"
+      }
+    },
+    "supplierRouting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "isHeater": {
+          "type": "boolean"
+        },
+        "suppliersToQuery": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/supplierId"
+          }
+        },
+        "excludedForCategory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/supplierId"
+          }
+        },
+        "excludePolicy": {
+          "type": "string"
+        },
+        "allSuppliers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/supplierId"
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "priceRows": {
+      "type": "array",
+      "description": "Compatibility stubs only while route still expects priceRows. Always null prices and failure=collector_not_linked. Real price/stock/image are supplier-collector only via TPS queue.",
+      "items": {
+        "$ref": "#/$defs/priceRowStub"
+      }
+    },
+    "approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edgarApprovalRequired",
+        "installerConfirmRequired",
+        "autoPurchase"
+      ],
+      "properties": {
+        "edgarApprovalRequired": {
+          "const": true
+        },
+        "installerConfirmRequired": {
+          "const": true
+        },
+        "autoPurchase": {
+          "const": false
+        }
+      }
+    },
+    "uiHints": {
+      "type": "object"
+    },
+    "missingPieces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "collector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "linked": {
+          "type": "boolean"
+        },
+        "httpEndpoint": {
+          "type": "null"
+        },
+        "bridge": {
+          "enum": [
+            "tps_server_queue_to_outbound_mac_worker"
+          ]
+        },
+        "latenodeOwnsPricing": {
+          "const": false
+        }
+      }
+    },
+    "builtAt": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "supplierId": {
+      "enum": [
+        "hirsch",
+        "reece_us",
+        "homedepot",
+        "lowes",
+        "supplyhouse",
+        "masterbuildermercantile",
+        "winsupply"
+      ]
+    },
+    "modelEvidence": {
+      "enum": [
+        "input_explicit",
+        "ocr_nameplate",
+        "manufacturer_ref",
+        null
+      ]
+    },
+    "matchStatus": {
+      "enum": [
+        "exact",
+        "type_brand_size",
+        "candidate_hypothesis",
+        "unknown"
+      ]
+    },
+    "candidateHypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "brand",
+        "model",
+        "matchKind",
+        "oemProven",
+        "unverifiedHypothesis"
+      ],
+      "properties": {
+        "brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matchKind": {
+          "const": "candidate_hypothesis"
+        },
+        "oemProven": {
+          "const": false
+        },
+        "unverifiedHypothesis": {
+          "const": true
+        },
+        "differences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missingDetails": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compatibilityNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filterPass": {
+          "type": "object"
+        },
+        "uiEligible": {
+          "type": "boolean"
+        },
+        "hardFilterFailed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "enrichment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "identity",
+        "targetSpecs",
+        "matchStatus",
+        "candidates",
+        "confidence",
+        "unknowns",
+        "reasonsAreNotFacts"
+      ],
+      "properties": {
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "manufacturer",
+            "brand",
+            "model",
+            "partNumber",
+            "itemNumber",
+            "sizeOrType",
+            "modelEvidence"
+          ],
+          "properties": {
+            "manufacturer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "brand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Null unless explicit in input/OCR/manufacturer_ref"
+            },
+            "partNumber": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "itemNumber": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sizeOrType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "modelEvidence": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "input_explicit",
+                "ocr_nameplate",
+                "manufacturer_ref",
+                null
+              ]
+            }
+          }
+        },
+        "targetSpecs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fuel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "capacityGal": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "inputBtu": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "recoveryGph": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "recoveryRiseF": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "venting": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "emissions": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commercialClass": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "heightIn": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "diameterIn": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "connectionSizeIn": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "rawText": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "matchStatus": {
+          "$ref": "#/$defs/matchStatus"
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/candidateHypothesis"
+          }
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unreadable": {
+          "type": "boolean"
+        },
+        "reasoningSummary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "postValidationNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasonsAreNotFacts": {
+          "const": true
+        }
+      }
+    },
+    "priceRowStub": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supplier",
+        "price",
+        "imageUrl",
+        "priceKind",
+        "failure"
+      ],
+      "properties": {
+        "supplier": {
+          "$ref": "#/$defs/supplierId"
+        },
+        "matchStatus": {
+          "type": "string"
+        },
+        "sku": {
+          "type": "null"
+        },
+        "title": {
+          "type": "null"
+        },
+        "productUrl": {
+          "type": "null"
+        },
+        "imageUrl": {
+          "type": "null"
+        },
+        "price": {
+          "type": "null"
+        },
+        "listPrice": {
+          "type": "null"
+        },
+        "priceKind": {
+          "const": "authenticated_unknown"
+        },
+        "currency": {
+          "type": "null"
+        },
+        "uom": {
+          "type": "null"
+        },
+        "qty": {
+          "type": "number"
+        },
+        "asOf": {
+          "type": "null"
+        },
+        "availability": {
+          "type": "object"
+        },
+        "failure": {
+          "const": "collector_not_linked"
+        },
+        "failureDetail": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

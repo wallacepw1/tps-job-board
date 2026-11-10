@@ -2,6 +2,7 @@
 const {verifySlackRequest}=require('./call-actions-proxy');
 const {assistantMeldRequest}=require('./assistant-meld-relay');
 const {handlePhone}=require('./phone-admin');
+const {handlePriceSearch,publicStatus}=require('./price-search');
 const TARGET='https://webhook.latenode.com/27333/prod/media-bot-slack-events';
 function parseAssistantBody(raw){
  try{return JSON.parse(raw);}catch{
@@ -33,6 +34,9 @@ function registerAssistantEventsProxy(receiver,options={}){
    // Phone settings (/admin phone) are answered here, never relayed to Latenode.
    const phone=handlePhone(body,{fetch:options.fetch,load:options.loadPhone});
    if(phone){if(phone.json)res.status(phone.status).json(phone.json);else res.status(phone.status).send(phone.body);return;}
+   // Price search is an Assistant modal. It never publishes the Job Board Home or replaces the Assistant Home.
+   const price=handlePriceSearch(body,{fetch:options.fetch,enabled:options.priceSearchEnabled,token:options.assistantToken,schedule:options.schedule,env:options.env,now:options.now,photoLoader:options.photoLoader,client:options.priceClient});
+   if(price){if(price.json)res.status(price.status).json(price.json);else res.status(price.status).send(price.body??'');return;}
    const meld=assistantMeldRequest(body,options.key||process.env.TPS_INTERNAL_KEY);
    if(meld){
     if(!meld.forward)return res.status(meld.status).send(meld.body);
@@ -46,7 +50,7 @@ function registerAssistantEventsProxy(receiver,options={}){
    res.status(response.status).type('application/json').send(await response.text());
   }catch{if(!res.headersSent)res.status(502).send('Assistant could not be reached.');}
  });
- receiver.router.get('/slack/assistant-events/health',(_req,res)=>res.json({ready:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET),meldReady:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET)&&!!(options.key||process.env.TPS_INTERNAL_KEY)}));
+ receiver.router.get('/slack/assistant-events/health',(_req,res)=>res.json({ready:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET),meldReady:!!(options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET)&&!!(options.key||process.env.TPS_INTERNAL_KEY),priceSearch:publicStatus(options.env,options.assistantToken||process.env.TPS_ASSISTANT_BOT_TOKEN)}));
 }
 module.exports={parseAssistantBody,shouldForwardAssistant,registerAssistantEventsProxy};
 

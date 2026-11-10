@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tps-price-v1",
+  "title": "TPS price bridge v1",
+  "description": "Interop contract for the Mac outbound worker and the existing TPS app queue. No webhook URL, token, or account secret belongs in this file.",
+  "$defs": {
+    "supplierId": {
+      "enum": ["hirsch", "reece_us", "homedepot", "lowes", "supplyhouse", "masterbuildermercantile", "winsupply"]
+    },
+    "nonEmptyString": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" },
+    "identifiedSpecs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fuel": { "type": ["string", "null"] },
+        "inputBtu": { "type": ["string", "null"] },
+        "recoveryTemperatureRise": { "type": ["string", "null"] },
+        "recoveryGph": { "type": ["string", "null"] },
+        "ventType": { "type": ["string", "null"] },
+        "ventMaterial": { "type": ["string", "null"] },
+        "emissions": { "type": ["string", "null"] },
+        "gallons": { "type": ["string", "array", "null"], "items": { "type": "string" } },
+        "dimensions": { "type": ["object", "null"] }
+      }
+    },
+    "image": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "alt": { "type": ["string", "null"] },
+        "relation": {
+          "enum": ["displayed_image", "filename_contains_model", "supplier_illustrative_not_exact_model", "supplier_catalog_illustration"]
+        }
+      }
+    },
+    "branchAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "quantity", "guaranteedStock"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "branchNumber": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "distance": { "type": ["string", "null"] },
+        "scope": { "enum": ["local", "nearby", "other_branch", "network", "unknown"] },
+        "quantity": { "type": ["string", "null"] },
+        "quantityProvenance": { "enum": ["explicit_cell", "displayed_count", "not_displayed"] },
+        "statusText": { "type": ["string", "null"] },
+        "etaText": { "type": ["string", "null"] },
+        "etaProvenance": { "enum": ["displayed_text", "not_displayed"] },
+        "needsConfirmation": { "type": "boolean" },
+        "guaranteedStock": { "const": false }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["guaranteedStock"],
+      "properties": {
+        "local": { "type": ["string", "null"] },
+        "nearby": { "type": ["string", "null"] },
+        "network": { "type": ["string", "null"] },
+        "availableToOrder": { "type": ["boolean", "null"] },
+        "needsConfirmation": { "type": "boolean" },
+        "guaranteedStock": { "const": false },
+        "raw": { "type": ["string", "null"] }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supplierId", "matchClass", "filterPass"],
+      "properties": {
+        "supplierId": { "$ref": "#/$defs/supplierId" },
+        "matchClass": { "enum": ["exact", "candidate_equivalent", "suitable_equivalent", "tradeoff", "not_equivalent", "insufficient_evidence", "unknown"] },
+        "filterPass": { "type": "boolean" },
+        "productUrl": { "type": ["string", "null"] },
+        "image": { "$ref": "#/$defs/image" },
+        "comparison": { "$ref": "#/$defs/identifiedSpecs" },
+        "differences": { "type": "array" },
+        "missingDetails": { "type": "array", "items": { "type": "string" } },
+        "evidenceKind": { "enum": ["live_dom", "supplied_observation", "candidate_hint", "fixture", "not_collected"] }
+      }
+    },
+    "priceRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supplierId", "priceKind", "guaranteedStock"],
+      "properties": {
+        "supplierId": { "$ref": "#/$defs/supplierId" },
+        "productUrl": { "type": ["string", "null"] },
+        "image": { "$ref": "#/$defs/image" },
+        "price": { "type": ["string", "null"] },
+        "priceKind": { "enum": ["verified_account_net", "authenticated_unknown", "public", "list", "unknown", "not_configured", "unsupported"] },
+        "currency": { "type": ["string", "null"] },
+        "rawPriceText": { "type": ["string", "null"] },
+        "uom": { "type": ["string", "null"] },
+        "availability": { "$ref": "#/$defs/availability" },
+        "otherBranches": { "type": "array", "items": { "$ref": "#/$defs/branchAvailability" } },
+        "freshness": { "type": "object" },
+        "guaranteedStock": { "const": false }
+      }
+    },
+    "supplierError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supplierId", "code", "retryable"],
+      "properties": {
+        "supplierId": { "type": "string" },
+        "code": {
+          "enum": [
+            "location_required",
+            "missing_company",
+            "not_executed",
+            "not_configured",
+            "search_address_not_configured",
+            "result_selectors_not_configured",
+            "execution_disabled",
+            "excluded_by_source_policy",
+            "auth_expired",
+            "access_denied",
+            "rate_limited",
+            "captcha_or_challenge",
+            "unsupported"
+          ]
+        },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "queryType"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/nonEmptyString" },
+        "queryType": { "enum": ["photo", "model_text", "part_number", "description"] },
+        "modelHint": { "type": ["string", "null"] },
+        "partNumber": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "photoRef": { "type": ["string", "null"] },
+        "fileName": { "type": ["string", "null"] },
+        "fileUrl": { "type": ["string", "null"] },
+        "qty": { "type": "number", "exclusiveMinimum": 0 },
+        "matchPriority": { "enum": ["default", "strict_size"] },
+        "categoryHint": { "type": ["string", "null"] },
+        "location": { "type": ["object", "null"] },
+        "identifiedSpecs": { "$ref": "#/$defs/identifiedSpecs" },
+        "candidateHints": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "supplierId": { "$ref": "#/$defs/supplierId" },
+              "model": { "type": ["string", "null"] },
+              "partNumber": { "type": ["string", "null"] },
+              "productUrl": { "type": ["string", "null"] },
+              "image": { "$ref": "#/$defs/image" },
+              "specs": { "$ref": "#/$defs/identifiedSpecs" }
+            }
+          }
+        },
+        "suppliers": { "type": "array", "items": { "$ref": "#/$defs/supplierId" } },
+        "companyContext": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "winsupply": { "type": ["string", "null"] }
+          }
+        },
+        "uiSource": { "const": "tps_assistant_app_home" },
+        "mode": { "enum": ["plan", "execute"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "queryType": { "const": "model_text" } }, "required": ["queryType"] },
+          "then": { "required": ["modelHint"], "properties": { "modelHint": { "$ref": "#/$defs/nonEmptyString" } } }
+        },
+        {
+          "if": { "properties": { "queryType": { "const": "part_number" } }, "required": ["queryType"] },
+          "then": { "required": ["partNumber"], "properties": { "partNumber": { "$ref": "#/$defs/nonEmptyString" } } }
+        },
+        {
+          "if": { "properties": { "queryType": { "const": "description" } }, "required": ["queryType"] },
+          "then": { "required": ["description"], "properties": { "description": { "$ref": "#/$defs/nonEmptyString" } } }
+        },
+        {
+          "if": { "properties": { "queryType": { "const": "photo" } }, "required": ["queryType"] },
+          "then": { "required": ["photoRef"], "properties": { "photoRef": { "$ref": "#/$defs/nonEmptyString" } } }
+        }
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["contractVersion", "requestId", "identify", "candidates", "priceRows", "uiHints", "approvals", "collector", "supplierErrors"],
+      "properties": {
+        "contractVersion": { "const": "tps-price-v1" },
+        "requestId": { "type": "string" },
+        "identify": { "type": "object" },
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+        "priceRows": { "type": "array", "items": { "$ref": "#/$defs/priceRow" } },
+        "supplierErrors": { "type": "array", "items": { "$ref": "#/$defs/supplierError" } },
+        "uiHints": { "type": "object" },
+        "approvals": {
+          "type": "object",
+          "required": ["edgarApprovalRequired", "installerConfirmRequired", "autoPurchase"],
+          "properties": {
+            "edgarApprovalRequired": { "const": true },
+            "installerConfirmRequired": { "const": true },
+            "autoPurchase": { "const": false }
+          }
+        },
+        "collector": {
+          "type": "object",
+          "required": ["linked", "liveRun", "evidenceKind", "bridge"],
+          "properties": {
+            "linked": { "type": "boolean" },
+            "liveRun": { "type": "boolean", "description": "True only when this worker collected live visible DOM for the job. Fixture and plan results stay false." },
+            "evidenceKind": { "enum": ["live_dom", "supplied_observation", "candidate_hint", "fixture", "not_collected"] },
+            "httpEndpoint": { "type": ["string", "null"], "description": "Null for the outbound worker. The Mac does not expose an inbound listener to the cloud." },
+            "bridge": { "enum": ["outbound_mac_worker", "loopback_local_check"] }
+          }
+        }
+      }
+    },
+    "claimRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workerId", "capabilities"],
+      "properties": {
+        "workerId": { "$ref": "#/$defs/nonEmptyString" },
+        "capabilities": { "type": "array", "items": { "$ref": "#/$defs/supplierId" }, "minItems": 1 }
+      }
+    },
+    "claimResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["job"],
+      "properties": {
+        "job": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "leaseId", "request"],
+              "properties": {
+                "id": { "$ref": "#/$defs/nonEmptyString" },
+                "leaseId": { "$ref": "#/$defs/nonEmptyString" },
+                "request": { "$ref": "#/$defs/request" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "resultPost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workerId", "leaseId", "result"],
+      "properties": {
+        "workerId": { "$ref": "#/$defs/nonEmptyString" },
+        "leaseId": { "$ref": "#/$defs/nonEmptyString" },
+        "result": { "$ref": "#/$defs/result" }
+      }
+    },
+    "resultAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted"],
+      "properties": { "accepted": { "const": true } }
+    }
+  }
+}
