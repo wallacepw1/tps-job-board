@@ -4,7 +4,7 @@ const { randomUUID, createHash, timingSafeEqual } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { SUPPLIERS } = require('./price-search-policy');
-const { validateRequest, validateResult, validateClaim, validateClaimResponse, validateResultPost, validateResultAck } = require('./price-contract');
+const { validateRequest, validateResult, validateClaim, validateClaimResponse, validateResultPost, validateResultAck, adaptCollectorResult } = require('./price-contract');
 
 const SUPPLIER_IDS = new Set(SUPPLIERS.map(supplier => supplier.id));
 const MAX_QUEUE = 40;
@@ -180,10 +180,11 @@ function createBridge({ file = defaultFile(), now = Date.now, enabled = false, t
     if (job.status !== 'leased' || body.leaseId !== job.leaseId || !(job.leaseExpiresAt > now())) {
       return { status: 409, body: { accepted: false, error: 'wrong_lease' } };
     }
-    const checked = validateResult(body.result);
+    const adapted = adaptCollectorResult(body.result);
+    const checked = validateResult(adapted.schema);
     if (!checked.ok || checked.endpointRejected) return { status: 400, body: { accepted: false, error: 'invalid_result' } };
     job.status = 'complete';
-    job.result = body.result;
+    job.result = adapted.normalized;
     job.resultHash = digest(body.result);
     job.leaseExpiresAt = now() + JOB_TTL_MS;
     persist();

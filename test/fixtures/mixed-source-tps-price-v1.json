@@ -1,0 +1,165 @@
+{
+  "contractVersion": "tps-price-v1",
+  "requestId": "example-mixed-source",
+  "operational": false,
+  "fixtureOnly": true,
+  "note": "Representative contract fixture for the UI agent. operational is false. The SupplyHouse row is capture evidence. live_observation is per row and is not implied by collector.liveRun.",
+  "collector": {
+    "linked": true,
+    "liveRun": true,
+    "evidenceKind": "mixed",
+    "httpEndpoint": null,
+    "bridge": "outbound_mac_worker"
+  },
+  "candidates": [
+    {
+      "supplier_id": "supplyhouse",
+      "match_class": "not_equivalent",
+      "evidence_kind": "fixture",
+      "live_observation": false,
+      "checked_at": "2026-11-09T23:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "filter_pass": false,
+      "product_url": "https://www.supplyhouse.com/Watts-88004112-1-Lead-Free-Bronze-RPZ-LF009M2QTFS",
+      "image": {
+        "url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/watts8800411201stockimagejuly2026.jpg",
+        "alt": "Main product image of 1\" Lead Free Bronze RPZ (LF009M2QTFS), click to enlarge"
+      },
+      "differences": [],
+      "missing_details": [],
+      "freshness": {
+        "collected_at": "2026-11-09T23:00:00.000Z",
+        "stale_after": null,
+        "staleness": "fixture"
+      }
+    },
+    {
+      "supplier_id": "hirsch",
+      "match_class": "candidate_equivalent",
+      "evidence_kind": "live_dom",
+      "live_observation": true,
+      "checked_at": "2026-11-10T00:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "filter_pass": true,
+      "product_url": "https://www.hirsch.com/products/example",
+      "image": null,
+      "differences": [],
+      "missing_details": [],
+      "freshness": {
+        "collected_at": "2026-11-10T00:00:00.000Z",
+        "stale_after": "2026-11-10T12:00:00.000Z",
+        "staleness": "fresh"
+      }
+    }
+  ],
+  "priceRows": [
+    {
+      "supplier_id": "supplyhouse",
+      "product_url": "https://www.supplyhouse.com/Watts-88004112-1-Lead-Free-Bronze-RPZ-LF009M2QTFS",
+      "evidence_kind": "fixture",
+      "live_observation": false,
+      "checked_at": "2026-11-09T23:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "image_url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/watts8800411201stockimagejuly2026.jpg",
+      "image_alt": "Main product image of 1\" Lead Free Bronze RPZ (LF009M2QTFS), click to enlarge",
+      "image": {
+        "url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/watts8800411201stockimagejuly2026.jpg",
+        "alt": "Main product image of 1\" Lead Free Bronze RPZ (LF009M2QTFS), click to enlarge"
+      },
+      "price": "726.72",
+      "price_kind": "authenticated_unknown",
+      "currency": null,
+      "raw_price_text": "$726.72",
+      "previous_price_raw": "$749.19",
+      "list_price_raw": null,
+      "availability": {
+        "local": "in_stock",
+        "nearby": "not_observed",
+        "network": "unknown",
+        "available_to_order": null,
+        "needs_confirmation": false,
+        "guaranteed_stock": false
+      },
+      "delivery_buckets": [
+        {
+          "arrival_date": "Wed, Nov 11",
+          "qty": 2,
+          "supplier": "SupplyHouse"
+        },
+        {
+          "arrival_date": "Fri, Nov 13",
+          "qty": 61,
+          "supplier": "SupplyHouse"
+        },
+        {
+          "arrival_date": "Mon, Nov 16",
+          "qty": 110,
+          "supplier": "SupplyHouse"
+        }
+      ],
+      "other_branches": [],
+      "freshness": {
+        "collected_at": "2026-11-09T23:00:00.000Z",
+        "stale_after": null,
+        "staleness": "fixture"
+      }
+    },
+    {
+      "supplier_id": "hirsch",
+      "product_url": "https://www.hirsch.com/products/example",
+      "evidence_kind": "live_dom",
+      "live_observation": true,
+      "checked_at": "2026-11-10T00:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "image_url": null,
+      "image_alt": null,
+      "image": null,
+      "price": "10.00",
+      "price_kind": "authenticated_unknown",
+      "currency": null,
+      "raw_price_text": "$10.00",
+      "previous_price_raw": null,
+      "list_price_raw": null,
+      "availability": {
+        "local": "not_observed",
+        "nearby": "not_observed",
+        "network": "unknown",
+        "available_to_order": null,
+        "needs_confirmation": false,
+        "guaranteed_stock": false
+      },
+      "delivery_buckets": [],
+      "other_branches": [],
+      "freshness": {
+        "collected_at": "2026-11-10T00:00:00.000Z",
+        "stale_after": "2026-11-10T12:00:00.000Z",
+        "staleness": "fresh"
+      }
+    }
+  ],
+  "approvals": {
+    "edgarApprovalRequired": true,
+    "installerConfirmRequired": true,
+    "autoPurchase": false
+  }
+}

@@ -116,6 +116,47 @@ function enrichmentFrom(body) {
   return { ok: true, enrichment: null, identifiedSpecs, candidateHints, categoryHint: null, suppliers: null, hypotheses: [] };
 }
 
+const RENAME = { supplier_id: 'supplierId', match_class: 'matchClass', filter_pass: 'filterPass', product_url: 'productUrl', evidence_kind: 'evidenceKind', price_kind: 'priceKind', raw_price_text: 'rawPriceText', guaranteed_stock: 'guaranteedStock', other_branches: 'otherBranches', missing_details: 'missingDetails', available_to_order: 'availableToOrder', needs_confirmation: 'needsConfirmation', image_url: 'imageUrl', image_alt: 'imageAlt' };
+function rename(value) {
+  if (Array.isArray(value)) return value.map(rename);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const [key, item] of Object.entries(value)) out[RENAME[key] || key] = rename(item);
+  return out;
+}
+function pick(obj, keys) { const out = {}; for (const key of keys) if (obj && obj[key] !== undefined) out[key] = obj[key]; return out; }
+function normalizeCandidate(raw) {
+  const row = rename(raw || {});
+  if (!row.image && row.imageUrl) row.image = { url: row.imageUrl, alt: row.imageAlt || null };
+  return row;
+}
+function normalizePrice(raw) {
+  const row = rename(raw || {});
+  if (!row.image && row.imageUrl) row.image = { url: row.imageUrl, alt: row.imageAlt || null };
+  if (row.guaranteedStock == null) row.guaranteedStock = false;
+  if (row.availability && row.availability.guaranteedStock == null) row.availability.guaranteedStock = false;
+  return row;
+}
+function adaptCollectorResult(raw) {
+  const renamed = rename(raw || {});
+  const candidates = (renamed.candidates || []).map(normalizeCandidate);
+  const priceRows = (renamed.priceRows || []).map(normalizePrice);
+  const collector = renamed.collector || {};
+  const normalized = { ...renamed, candidates, priceRows, collector, identify: renamed.identify || {}, uiHints: renamed.uiHints || {}, supplierErrors: renamed.supplierErrors || [] };
+  const schemaResult = {
+    contractVersion: normalized.contractVersion,
+    requestId: normalized.requestId,
+    identify: normalized.identify,
+    candidates: candidates.map(row => pick(row, ['supplierId', 'matchClass', 'filterPass', 'productUrl', 'image', 'comparison', 'differences', 'missingDetails', 'evidenceKind', 'live_observation', 'checked_at', 'auth'])),
+    priceRows: priceRows.map(row => pick(row, ['supplierId', 'productUrl', 'image', 'price', 'priceKind', 'currency', 'rawPriceText', 'uom', 'availability', 'otherBranches', 'freshness', 'guaranteedStock'])),
+    uiHints: normalized.uiHints,
+    approvals: normalized.approvals,
+    collector: pick(collector, ['linked', 'liveRun', 'evidenceKind', 'httpEndpoint', 'bridge']),
+    supplierErrors: normalized.supplierErrors,
+  };
+  return { normalized, schema: schemaResult };
+}
+
 function validateRequest(value) { return report(validate.request, value); }
 function validateResult(value) { return { ...report(validate.result, value), endpointRejected: value?.collector?.httpEndpoint != null }; }
 function validateClaim(value) { return report(validate.claim, value); }
@@ -124,5 +165,5 @@ function validateResultPost(value) { return report(validate.resultPost, value); 
 function validateResultAck(value) { return report(validate.resultAck, value); }
 
 module.exports = {
-  schema, enrichmentFrom, mapEnrichment, mapSpecs, mapHints, validateRequest, validateResult, validateClaim, validateClaimResponse, validateResultPost, validateResultAck,
+  schema, enrichmentFrom, mapEnrichment, mapSpecs, mapHints, adaptCollectorResult, validateRequest, validateResult, validateClaim, validateClaimResponse, validateResultPost, validateResultAck,
 };

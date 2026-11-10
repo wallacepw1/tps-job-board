@@ -111,8 +111,13 @@ function statusView(sessionId, level, message) {
   ]);
 }
 
-function pageIsLive(source) {
-  return source?.linked === true && source?.liveRun === true && source?.evidenceKind === 'live_dom' && source?.httpEndpoint == null;
+function rowIsCurrentLive(row, collector) {
+  if (collector?.linked !== true || collector?.liveRun !== true || collector?.httpEndpoint != null) return false;
+  if (row?.live_observation === false || row?.freshness?.staleness === 'fixture') return false;
+  const kind = row?.evidenceKind || collector?.evidenceKind;
+  if (['fixture', 'supplied_observation', 'candidate_hint', 'not_collected', 'mixed'].includes(kind)) return false;
+  if (row?.live_observation === true) return !kind || kind === 'live_dom';
+  return kind === 'live_dom';
 }
 
 function moneyTail(row) {
@@ -121,19 +126,18 @@ function moneyTail(row) {
 }
 
 function priceLines(row, source) {
-  const kind = String(row.priceKind || '');
+  const kind = String(row.priceKind || row.auth?.priceKind || '');
   const { ACCOUNT_PRICE_SUPPLIERS } = require('./price-search-policy');
   const account = ACCOUNT_PRICE_SUPPLIERS.includes(row.supplierId);
-  const live = pageIsLive(source);
+  const live = rowIsCurrentLive(row, source);
   const hasAmount = typeof row.price === 'string' && row.price.trim();
   if (account && (kind === 'public' || kind === 'list')) return ['Guest price is not shown. login_required.'];
-  const notLiveRow = ['fixture', 'supplied_observation', 'candidate_hint', 'not_collected'].includes(source?.evidenceKind);
-  if (account && kind === 'authenticated_unknown') {
-    if (hasAmount && !notLiveRow && source?.linked !== false && source?.liveRun !== false && source?.httpEndpoint == null) return [`Signed-in price; net status unverified. ${moneyTail(row)}`];
-    if (notLiveRow) return ['not_validated. This row is not a live capture.'];
-    return ['login_required. Signed-in price was not observed on a live page. not_validated.'];
+  if (kind === 'authenticated_unknown' || row.auth?.displayLabel === 'signed_in_net_unverified') {
+    if (!live) return ['not_validated. This row is not a live capture.'];
+    if (row.auth?.signedInMarker !== 'observed') return ['Not a confirmed net price.'];
+    if (!hasAmount) return [/call for pricing/i.test(row.rawPriceText || '') || !row.rawPriceText ? 'Call for pricing' : esc(row.rawPriceText)];
+    return [`Signed-in price; net status unverified. ${moneyTail(row)}`];
   }
-  if (account && kind !== 'verified_account_net') return ['login_required. Signed-in price was not observed on a live page. not_validated.'];
   if (!live || !hasAmount || !['verified_account_net', 'public', 'list'].includes(kind)) {
     if (kind === 'authenticated_unknown') return ['Not a confirmed net price.'];
     if (kind === 'unsupported') return ['unsupported. Price not_validated.'];
@@ -145,7 +149,7 @@ function priceLines(row, source) {
 }
 
 function stockLines(row, source) {
-  if (!pageIsLive(source)) return ['Stock not_validated. Not a live check.'];
+  if (!rowIsCurrentLive(row, source)) return ['Stock not_validated. Not a live check.'];
   const lines = [];
   const availability = row.availability || {};
   const branches = Array.isArray(row.otherBranches) ? row.otherBranches : [];

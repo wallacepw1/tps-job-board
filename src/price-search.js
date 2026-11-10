@@ -6,7 +6,7 @@ const { ADMINS } = require('./assignment-policy');
 const { slackApi } = require('./job-files');
 const { createPriceClient, publicStatus, buildRequest } = require('./price-search-client');
 const { getPriceBridge } = require('./price-bridge');
-const { validateResult } = require('./price-contract');
+const { validateResult, adaptCollectorResult } = require('./price-contract');
 const { intentFrom, normModel, classifyCandidate, brandRank, supplierIdsFor, effectiveCategory, supplierName, HEATER_EXCLUDED } = require('./price-search-policy');
 const { OPEN, RETRY, NEW, searchForm, searchingView, statusView, resultsView, understoodLine } = require('./price-search-view');
 
@@ -95,11 +95,18 @@ function rowSourceFor(row, candidates, collector) {
 }
 
 function rowsFor(candidate, rows) {
-  if (candidate.evidenceKind !== 'live_dom' || !candidate.supplierId) return [];
-  return rows.filter(row => (row.supplierId || row.supplier) === candidate.supplierId);
+  if (candidate.evidenceKind !== 'live_dom' || candidate.live_observation === false || !candidate.supplierId) return [];
+  return rows.filter(row => {
+    const supplier = row.supplierId || row.supplier;
+    if (supplier !== candidate.supplierId) return false;
+    if (row.live_observation === false || row.freshness?.staleness === 'fixture') return false;
+    if (row.evidenceKind && row.evidenceKind !== 'live_dom') return false;
+    return true;
+  });
 }
 
 function presentResult(input, result) {
+  result = adaptCollectorResult(result).normalized;
   const intent = intentFrom(input);
   intent.modelKey = normModel(input.modelHint || input.partNumber);
   const category = effectiveCategory(input);
@@ -129,7 +136,7 @@ function presentResult(input, result) {
       evidenceKind: raw.evidenceKind || null,
     };
     const judged = classifyCandidate(intent, item);
-    const observed = raw.evidenceKind === 'live_dom' && collector.linked === true && collector.liveRun === true && collector.httpEndpoint == null;
+    const observed = raw.live_observation !== false && raw.evidenceKind === 'live_dom' && raw.freshness?.staleness !== 'fixture' && collector.linked === true && collector.liveRun === true && collector.httpEndpoint == null;
     let kind = raw.evidenceKind === 'fixture' || raw.filterPass === false || judged.kind === 'rejected' || raw.matchClass === 'not_equivalent' ? 'rejected' : raw.matchClass === 'exact' && judged.kind === 'exact' ? 'exact' : ['candidate_equivalent', 'suitable_equivalent', 'tradeoff'].includes(raw.matchClass) ? 'equivalent' : ['insufficient_evidence', 'unknown'].includes(raw.matchClass) ? 'verify' : judged.kind;
     if ((kind === 'exact' || kind === 'equivalent') && !observed) kind = 'verify';
     const hypothesis = raw.evidenceKind === 'candidate_hint' || raw.evidenceKind == null;
@@ -144,6 +151,7 @@ function presentResult(input, result) {
   for (const bucket of [groups.exact, groups.equivalent, groups.verify]) bucket.sort((a, b) => brandRank(a) - brandRank(b));
   const errors = (result.supplierErrors || []).map(error => {
     const name = supplierName(error.supplierId)?.name || error.supplierId || 'Supplier';
+    if (error.code === 'company_chosen_selectors_pending') return `${name}: company is chosen. Price selectors are not ready yet.`;
     if (error.code === 'location_required' && error.supplierId === 'winsupply') return `${name}: WinSupply of South San Diego (National City) is selected, but the signed-in location was not confirmed.`;
     if (['auth_expired', 'access_denied', 'missing_company'].includes(error.code)) return `${name}: account login required. Price unverified.`;
     return `${name}: ${error.message || error.code || 'could not be checked.'}`;

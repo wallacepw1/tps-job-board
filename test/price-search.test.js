@@ -75,7 +75,7 @@ test('gallon keyword, electric, and smaller gas heaters are not commercial 120k 
   assert.doesNotMatch(view, /\*SupplyHouse\*/);
   assert.match(view, /WinSupply/);
   assert.doesNotMatch(view, /\$|49\.00|12\.00|Add to Cart|Add to List/);
-  assert.match(view, /login_required/);
+  assert.match(view, /not_validated/);
   assert.match(view, /Input hypothesis is not product evidence/);
   assert.match(view, /Not a confirmed net price/);
   assert.match(view, /Installer approval is not granted/);
@@ -89,7 +89,7 @@ test('a live page does not make another row look live, and a signed-in account p
       { title: 'Live 80 gallon 120000 BTU natural gas metal', model: 'LIVE-1', supplierId: 'winsupply', evidenceKind: 'live_dom', matchClass: 'exact', filterPass: true, comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' } },
       { title: 'Saved 80 gallon 120000 BTU natural gas metal', model: 'FIX-1', supplierId: 'winsupply', evidenceKind: 'supplied_observation', matchClass: 'exact', filterPass: true, comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' } },
     ],
-    priceRows: [{ supplierId: 'winsupply', price: '88.00', priceKind: 'authenticated_unknown', currency: 'USD', uom: 'each', guaranteedStock: false, freshness: { observedAt: '2026-11-09T00:00:00Z' } }, { supplierId: 'supplyhouse', price: '41.00', priceKind: 'public', guaranteedStock: false }],
+    priceRows: [{ supplierId: 'winsupply', price: '88.00', priceKind: 'authenticated_unknown', evidenceKind: 'live_dom', live_observation: true, auth: { signedInMarker: 'observed', netLabelVerified: false, priceKind: 'authenticated_unknown', displayLabel: 'signed_in_net_unverified' }, currency: 'USD', uom: 'each', guaranteedStock: false, freshness: { observedAt: '2026-11-09T00:00:00Z' } }, { supplierId: 'supplyhouse', price: '41.00', priceKind: 'public', evidenceKind: 'fixture', live_observation: false, guaranteedStock: false }],
   });
   const view = JSON.stringify(resultsView('session-2', result));
   assert.match(view, /Signed-in price; net status unverified/);
@@ -113,13 +113,13 @@ test('null and unproven prices never become amounts', () => {
   assert.match(priceLines({ supplierId: 'winsupply', price: '$5,670.79', priceKind: 'public', guaranteedStock: false }, live).join(' '), /login_required/);
   assert.match(priceLines({ supplierId: 'masterbuildermercantile', price: '10.00', priceKind: 'unsupported', guaranteedStock: false }, live).join(' '), /not_validated/);
   assert.doesNotMatch(priceLines({ supplierId: 'masterbuildermercantile', price: '10.00', priceKind: 'unsupported', guaranteedStock: false }, live).join(' '), /10\.00/);
-  const signed = priceLines({ supplierId: 'winsupply', price: '88.00', priceKind: 'authenticated_unknown', currency: 'USD', uom: 'each', freshness: { observedAt: '2026-11-09T00:00:00Z' }, guaranteedStock: false }, live).join(' ');
+  const signed = priceLines({ supplierId: 'winsupply', price: '88.00', priceKind: 'authenticated_unknown', evidenceKind: 'live_dom', live_observation: true, auth: { signedInMarker: 'observed', netLabelVerified: false, priceKind: 'authenticated_unknown', displayLabel: 'signed_in_net_unverified' }, currency: 'USD', uom: 'each', freshness: { observedAt: '2026-11-09T00:00:00Z' }, guaranteedStock: false }, live).join(' ');
   assert.match(signed, /Signed-in price; net status unverified/);
   assert.match(signed, /88\.00/);
   assert.doesNotMatch(signed, /verified_account_net|Account net/);
   const fixtureJob = { linked: true, liveRun: true, evidenceKind: 'fixture', httpEndpoint: null };
   assert.doesNotMatch(priceLines({ supplierId: 'supplyhouse', price: '88.00', priceKind: 'authenticated_unknown', guaranteedStock: false }, fixtureJob).join(' '), /88\.00/);
-  const member = priceLines({ supplierId: 'supplyhouse', price: '88.00', rawPriceText: '88.00', priceKind: 'authenticated_unknown', currency: 'USD', uom: 'each', guaranteedStock: false }, { linked: true, liveRun: true, evidenceKind: null, httpEndpoint: null }).join(' ');
+  const member = priceLines({ supplierId: 'supplyhouse', price: '88.00', rawPriceText: '88.00', priceKind: 'authenticated_unknown', evidenceKind: 'live_dom', live_observation: true, auth: { signedInMarker: 'observed', netLabelVerified: false, priceKind: 'authenticated_unknown', displayLabel: 'signed_in_net_unverified' }, currency: 'USD', uom: 'each', guaranteedStock: false }, { linked: true, liveRun: true, evidenceKind: 'mixed', httpEndpoint: null }).join(' ');
   assert.match(member, /Signed-in price; net status unverified/);
   assert.match(member, /88\.00/);
   assert.doesNotMatch(member, /login_required|Account net|verified_account_net/);

@@ -81,7 +81,20 @@
         "comparison": { "$ref": "#/$defs/identifiedSpecs" },
         "differences": { "type": "array" },
         "missingDetails": { "type": "array", "items": { "type": "string" } },
-        "evidenceKind": { "enum": ["live_dom", "supplied_observation", "candidate_hint", "fixture", "not_collected"] }
+        "evidenceKind": { "enum": ["live_dom", "supplied_observation", "candidate_hint", "fixture", "not_collected"] },
+        "live_observation": { "type": "boolean", "description": "True only for a row collected by the browser in this run. A fixture row stays false even when another row is live." },
+        "checked_at": { "type": ["string", "null"] },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signedInMarker", "netLabelVerified", "priceKind", "displayLabel"],
+          "properties": {
+            "signedInMarker": { "enum": ["observed", "not_observed", "not_configured"] },
+            "netLabelVerified": { "type": "boolean" },
+            "priceKind": { "type": "string" },
+            "displayLabel": { "enum": ["signed_in_net_unverified", "verified_account_net", "public", "list", "unknown", "not_configured", "unsupported"] }
+          }
+        }
       }
     },
     "priceRow": {
@@ -112,6 +125,7 @@
         "code": {
           "enum": [
             "location_required",
+            "company_chosen_selectors_pending",
             "missing_company",
             "not_executed",
             "not_configured",
@@ -221,7 +235,7 @@
           "properties": {
             "linked": { "type": "boolean" },
             "liveRun": { "type": "boolean", "description": "True only when this worker collected live visible DOM for the job. Fixture and plan results stay false." },
-            "evidenceKind": { "enum": ["live_dom", "supplied_observation", "candidate_hint", "fixture", "not_collected"] },
+            "evidenceKind": { "enum": ["live_dom", "supplied_observation", "candidate_hint", "fixture", "not_collected", "mixed"] },
             "httpEndpoint": { "type": ["string", "null"], "description": "Null for the outbound worker. The Mac does not expose an inbound listener to the cloud." },
             "bridge": { "enum": ["outbound_mac_worker", "loopback_local_check"] }
           }
