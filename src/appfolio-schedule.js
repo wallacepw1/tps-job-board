@@ -74,7 +74,9 @@ async function route(p,options={}){
   if(!isAdmin(p))return slack('views.open',{trigger_id:p.trigger_id,view:infoView('AppFolio scheduling','Only admins can book AppFolio times.')});
   if(!validCall(call))return slack('views.open',{trigger_id:p.trigger_id,view:infoView('AppFolio scheduling','This card has no AppFolio work order number.')});
   const opened=await slack('views.open',{trigger_id:p.trigger_id,view:loadingView(call)});
-  const meta={channel:p.channel?.id||p.container?.channel_id||'',cardTs:p.message?.ts||p.container?.message_ts||'',incomingTs:incomingTs(p.message?.blocks),recordId:recordId(p.message?.blocks)};
+  let meta={channel:p.channel?.id||p.container?.channel_id||'',cardTs:p.message?.ts||p.container?.message_ts||'',incomingTs:incomingTs(p.message?.blocks),recordId:recordId(p.message?.blocks)};
+  // Pressed in the "please schedule" DM: work on the call's card in Please Assign instead.
+  if(meta.channel!==ASSIGN&&/^D/.test(meta.channel)){const dm={channel:meta.channel,ts:meta.cardTs};meta={...(await findAssignCard(call,options).catch(e=>{console.error('appfolio card lookup',e.message);return null;})||{channel:'',cardTs:'',incomingTs:'',recordId:''}),dm};}
   let view;
   try{
    const out=await callPicker({mode:'read',invoice:call.invoice,workOrder:call.workOrder},options);
@@ -99,10 +101,23 @@ async function route(p,options={}){
  const when=booked?pacific(selection.start):own;let routed='';
  if(when)routed=await routeCard(p,meta,when,options);
  await slack('views.update',{view_id:p.view.id,view:infoView('AppFolio scheduling',text+(routed?'\n\n'+routed:''))}).catch(()=>{});
+ if((booked||own)&&/^D/.test(meta.dm?.channel||'')&&/^\d{10}\.\d{6}$/.test(meta.dm?.ts||'')){
+  const done=`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} scheduled by <@${p.user.id}>: ${booked?(label||out.appointment||''):own.date+' '+own.time}${routed?'\n'+routed:''}`;
+  await slack('chat.update',{channel:meta.dm.channel,ts:meta.dm.ts,text:done,blocks:[md(done)]}).catch(e=>console.error('appfolio dm update',e.message));
+ }
  if(booked&&/^\d{10}\.\d{6}$/.test(meta.incomingTs||'')){
   await slack('chat.postMessage',{channel:INCOMING,thread_ts:meta.incomingTs,text:`:calendar: AppFolio appointment booked by <@${p.user.id}> for WO ${meta.workOrder}: ${label||out.appointment||''}`,unfurl_links:false}).catch(e=>console.error('appfolio schedule log',e.message));
  }
  return{booked,routed};
+}
+// Finds the call's card in Please Assign by its Pick AppFolio time button (invoice + work order).
+async function findAssignCard(call,options={}){
+ const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN,fetcher=options.fetch||global.fetch;
+ const url=new URL('https://slack.com/api/conversations.history');url.searchParams.set('channel',ASSIGN);url.searchParams.set('limit','200');
+ const r=await fetcher(url.href,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)}),j=await r.json();
+ if(!j.ok)throw Error('conversations.history: '+j.error);
+ const m=(j.messages||[]).find(x=>(x.blocks||[]).some(b=>b.type==='actions'&&(b.elements||[]).some(e=>{if(e.action_id!==ACTION)return false;try{const v=JSON.parse(e.value);return v.invoice===call.invoice&&v.workOrder===call.workOrder;}catch{return false;}})));
+ return m?{channel:ASSIGN,cardTs:m.ts,incomingTs:incomingTs(m.blocks),recordId:recordId(m.blocks)}:null;
 }
 // After a time is set: a later day moves the Please Assign card to Future Calls at that time
 // (the same Reschedule request the Job Board sends); today leaves it in Please Assign.
@@ -120,4 +135,4 @@ async function routeCard(p,meta,when,options={}){
  }catch(e){return 'The card could not be moved to Future Calls ('+e.message+'). Use Reschedule on it.';}
 }
 
-module.exports={ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
+module.exports={findAssignCard,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
