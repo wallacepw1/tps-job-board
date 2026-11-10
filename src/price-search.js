@@ -8,9 +8,10 @@ const { createPriceClient, publicStatus, buildRequest } = require('./price-searc
 const { getPriceBridge } = require('./price-bridge');
 const { validateResult, adaptCollectorResult } = require('./price-contract');
 const { intentFrom, normModel, classifyCandidate, brandRank, supplierIdsFor, effectiveCategory, supplierName, HEATER_EXCLUDED } = require('./price-search-policy');
-const { OPEN, RETRY, NEW, searchForm, searchingView, statusView, resultsView, understoodLine } = require('./price-search-view');
+const { OPEN, RETRY, NEW, ANSWER, searchForm, searchingView, statusView, resultsView, questionView, understoodLine } = require('./price-search-view');
 
 const TEAM = 'T086X85G14N';
+const SEARCH_MISS = /search miss|No visible product link matched/i;
 const sessions = new Map();
 
 function resetPriceSearchSessions() { for (const session of sessions.values()) stop(session); sessions.clear(); }
@@ -116,7 +117,9 @@ function presentResult(input, result) {
     const known = supplierName(row.supplierId || row.supplier);
     return !known || !HEATER_EXCLUDED.includes(known.id);
   });
-  const candidates = (result.candidates || []).map(raw => {
+  const suggested = Array.isArray(input.recommendations) && input.recommendations.length > 0;
+  // With AI recommendations shown, a bare model hint is not repeated as a supplier product.
+  const candidates = (result.candidates || []).filter(raw => !(suggested && raw.evidenceKind === 'candidate_hint')).map(raw => {
     const comparison = raw.comparison || raw.specs || {};
     const image = raw.image || {};
     const illustrative = image.relation === 'supplier_illustrative_not_exact_model' || image.relation === 'supplier_catalog_illustration';
@@ -149,20 +152,37 @@ function presentResult(input, result) {
     bucket.push(item);
   }
   for (const bucket of [groups.exact, groups.equivalent, groups.verify]) bucket.sort((a, b) => brandRank(a) - brandRank(b));
-  const errors = (result.supplierErrors || []).map(error => {
+  // A supplier whose search had no match is left out. A supplier that was not checked is named once.
+  const notChecked = [];
+  const errors = (result.supplierErrors || []).filter(error => {
+    const name = supplierName(error.supplierId)?.name || error.supplierId || 'Supplier';
+    if (SEARCH_MISS.test(error.message || '')) return false;
+    if (['not_executed', 'not_configured', 'execution_disabled', 'result_selectors_not_configured', 'search_address_not_configured'].includes(error.code)) { if (!notChecked.includes(name)) notChecked.push(name); return false; }
+    return true;
+  }).map(error => {
     const name = supplierName(error.supplierId)?.name || error.supplierId || 'Supplier';
     if (error.code === 'company_chosen_selectors_pending') return `${name}: company is chosen. Price selectors are not ready yet.`;
     if (error.code === 'location_required' && error.supplierId === 'winsupply') return `${name}: WinSupply of South San Diego (National City) is selected, but the signed-in location was not confirmed.`;
     if (['auth_expired', 'access_denied', 'missing_company'].includes(error.code)) return `${name}: account login required. Price unverified.`;
     return `${name}: ${error.message || error.code || 'could not be checked.'}`;
   });
-  const hypotheses = (input.enrichment?.candidates || []).filter(item => item?.model).map(item => `Unverified hypothesis: ${item.model}. Not OEM-proven.`);
-  const unknowns = (input.enrichment?.unknowns || []).map(item => `${item}: unknown`);
-  const summary = [understoodLine(intent), input.identifyNote, category === 'heater' ? 'SupplyHouse and MBM are excluded for this heater search. WinSupply of South San Diego (National City) stays included.' : `Suppliers: ${supplierIdsFor(category).join(', ')}.`, ...unknowns, ...hypotheses].filter(Boolean).join('\n');
+  if (notChecked.length) errors.push(`Not checked yet: ${notChecked.join(', ')}.`);
+  const hypotheses = suggested ? [] : (input.enrichment?.candidates || []).filter(item => item?.model).map(item => `Unverified hypothesis: ${item.model}. Not OEM-proven.`);
+  const unknowns = suggested ? [] : (input.enrichment?.unknowns || []).map(item => `${item}: unknown`);
+  const seen = input.identified?.title ? `*Looks like:* ${input.identified.title}${input.identified.discontinued ? ` (discontinued${input.identified.discontinuedNote ? `: ${input.identified.discontinuedNote}` : ''})` : ''}` : null;
+  const answered = (input.answers || []).map(item => `${item.question} ${item.answer}`);
+  const summary = [understoodLine(intent), seen, ...answered, input.aiSummary, input.identifyNote, category === 'heater' ? 'SupplyHouse and MBM are excluded for this heater search. WinSupply of South San Diego (National City) stays included.' : `Suppliers: ${supplierIdsFor(category).join(', ')}.`, ...unknowns, ...hypotheses].filter(Boolean).join('\n');
   const liveSuppliers = new Set(candidates.filter(item => item.evidenceKind === 'live_dom').map(item => item.supplierId));
   const heldRows = rows.filter(row => !liveSuppliers.has(row.supplierId || row.supplier)).map(row => ({ row, source: rowSourceFor(row, candidates, collector) }));
   const liveNotice = candidates.some(item => item.observed) ? null : 'Not a live supplier check. Prices stay not_validated.';
-  return { groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, heldRows, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'A signed-in price is shown only on the live page that was captured.' };
+  const foundBy = {};
+  for (const item of input.recommendations || []) {
+    const name = item.title || [item.brand, item.model].filter(Boolean).join(' ');
+    const key = normModel(item.partNumber || item.model);
+    const at = key ? [...new Set(candidates.filter(c => c.observed && [c.model, c.partNumber, c.title].some(v => normModel(v).includes(key))).map(c => supplierName(c.supplierId)?.name).filter(Boolean))] : [];
+    if (at.length) foundBy[name] = at.join(', ');
+  }
+  return { recommendations: input.recommendations || [], foundBy, groups: { ...groups, rejected: groups.rejected.slice(0, 8), exact: groups.exact.slice(0, 4), equivalent: groups.equivalent.slice(0, 4), verify: groups.verify.slice(0, 3) }, summary, errors, heldRows, liveNotice, searchedAt: result.searchedAt || rows.find(row => row.freshness?.observedAt)?.freshness.observedAt || null, footer: 'A signed-in price is shown only on the live page that was captured.' };
 }
 
 async function defaultPhoto(file, token, fetch) {
@@ -232,6 +252,20 @@ function handlePriceSearch(body, options = {}) {
     return { status: 200, body: '', follow };
   }
 
+  if (body.type === 'view_submission' && body.view?.callback_id === ANSWER) {
+    const pending = existing.pending;
+    if (!pending) return { status: 200, json: { response_action: 'update', view: statusView(existing.id, 'warning', 'That search expired. Start again.') } };
+    const answers = readAnswers(body.view, pending.questions);
+    if (!answers.some(item => item.answer)) return { status: 200, json: { response_action: 'errors', errors: { ps_q0: 'Pick an answer or type one.' } } };
+    existing.pending = null;
+    existing.viewId = body.view.id;
+    const generation = ++existing.generation;
+    existing.cancel?.();
+    const runCtx = { input: existing.input, client, bridge, bridgeConfigured, token, fetch, schedule, update, now };
+    const follow = identifyAndQueue(existing, generation, runCtx, pending.payload, answers.filter(item => item.answer)).catch(error => console.error('price search failed', safeCode(error)));
+    return { status: 200, json: { response_action: 'update', view: searchingView(existing.id, 'Thanks. Searching with your answers.') }, follow };
+  }
+
   let input = existing?.input;
   let response = null;
   if (body.type === 'view_submission') {
@@ -274,14 +308,22 @@ async function runSearch(session, generation, ctx) {
     if (!ctx.client.config.identifyConfigured) return finish(session, generation, ctx, payload, { status: 'error', error: { message: 'Photo identification is not connected. No supplier search was queued.' } });
   }
   if (session.closed || session.generation !== generation) return;
+  return identifyAndQueue(session, generation, ctx, payload, []);
+}
+
+// The identify step may ask up to two questions first. Answers come back through the answer modal.
+async function identifyAndQueue(session, generation, ctx, payload, answers) {
   let identifyNote = null;
   if (ctx.client.config.identifyConfigured) {
-    const identified = await ctx.client.identify(buildRequest(payload), payload.photoBytes);
-    if (identified.status !== 'complete') return finish(session, generation, ctx, payload, { status: 'error', error: identified.error || { message: 'Identification could not be completed. No supplier search was queued.' } });
-    if (identified.identifiedSpecs) payload.identifiedSpecs = identified.identifiedSpecs;
-    if (Array.isArray(identified.candidateHints)) payload.candidateHints = identified.candidateHints;
-    if (identified.categoryHint) payload.categoryHint = identified.categoryHint;
-    if (identified.enrichment) payload.enrichment = identified.enrichment;
+    const identified = await ctx.client.identify(buildRequest(payload), payload.photoBytes, answers);
+    if (session.closed || session.generation !== generation) return;
+    if (identified.status === 'needs_answer' && !answers.length) {
+      session.pending = { payload, questions: identified.questions };
+      if (session.viewId) await ctx.update(session.viewId, questionView(session.id, identified));
+      return;
+    }
+    if (!['complete', 'needs_answer'].includes(identified.status)) return finish(session, generation, ctx, payload, { status: 'error', error: identified.error || { message: 'Identification could not be completed. No supplier search was queued.' } });
+    applyIdentified(payload, identified, answers);
     if (identified.dropped) identifyNote = 'Some identification fields were outside the supported list and were not queued.';
   } else identifyNote = 'Model identification is not connected. No identified specs were added.';
   payload.identifyNote = identifyNote;
@@ -294,6 +336,41 @@ async function runSearch(session, generation, ctx) {
   if (identifyNote && session.viewId) await ctx.update(session.viewId, searchingView(session.id, identifyNote));
   const result = await pollBridge(session, generation, queued.id, ctx);
   return finish(session, generation, ctx, payload, result);
+}
+
+function applyIdentified(payload, identified, answers) {
+  if (identified.identifiedSpecs) payload.identifiedSpecs = identified.identifiedSpecs;
+  if (identified.categoryHint) payload.categoryHint = identified.categoryHint;
+  if (identified.enrichment) payload.enrichment = identified.enrichment;
+  payload.recommendations = identified.recommendations || [];
+  payload.identified = identified.identified || null;
+  payload.aiSummary = identified.summary || null;
+  payload.answers = answers;
+  // Suppliers are searched for the AI's terms too: the exact or replacement model first, then alternatives.
+  const hints = [];
+  for (const item of payload.recommendations) {
+    const model = item.searchTerms[0] || item.partNumber || item.model;
+    if (model && !hints.some(hint => hint.model.toLowerCase() === model.toLowerCase())) hints.push({ model });
+  }
+  for (const hint of identified.candidateHints || []) if (hint.model && !hints.some(item => item.model.toLowerCase() === String(hint.model).toLowerCase())) hints.push(hint);
+  payload.candidateHints = hints.slice(0, 20);
+  // A photo alone has no text to type into a supplier's search box. Use what the photo was identified as.
+  if (!payload.modelHint && !payload.partNumber && !payload.description) {
+    const id = payload.identified || {};
+    const text = [id.brand, id.model || id.partNumber, id.size].filter(Boolean).join(' ') || hints[0]?.model || id.title;
+    if (text) payload.description = text;
+  }
+  if (answers.length && payload.description) payload.description = `${payload.description}\n${answers.map(item => `${item.question}: ${item.answer}`).join('\n')}`.slice(0, 500);
+}
+
+function readAnswers(view, questions) {
+  const values = view?.state?.values || {};
+  return questions.map((question, index) => {
+    const picked = values[`ps_q${index}`]?.answer?.selected_option?.value;
+    const typed = clean(values[`ps_qo${index}`]?.other?.value, 120);
+    const answer = typed || (picked != null ? question.options[Number(picked)] : '') || '';
+    return { id: question.id, question: question.text, answer };
+  });
 }
 
 async function finish(session, generation, ctx, payload, result) {

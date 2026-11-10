@@ -11,7 +11,8 @@ const MAX_QUEUE = 40;
 const MAX_CLAIM_BYTES = 8192;
 const MAX_RESULT_BYTES = 200000;
 const MAX_REQUEST_BYTES = 32000;
-const LEASE_MS = 180000;
+// A search can visit all seven suppliers with a 5 second pause between pages.
+const LEASE_MS = 8 * 60 * 1000;
 const JOB_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 const CLEAN_AFTER_MS = 60 * 60 * 1000;

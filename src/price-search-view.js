@@ -7,6 +7,7 @@ const RETRY = 'tps_price_search_retry';
 const NEW = 'tps_price_search_new';
 const FORM = 'tps_price_search_form';
 const RESULTS = 'tps_price_search_results';
+const ANSWER = 'tps_price_search_answer';
 
 const plain = text => ({ type: 'plain_text', text: String(text).slice(0, 150) });
 const title = text => ({ type: 'plain_text', text: String(text).slice(0, 24) });
@@ -102,6 +103,54 @@ function searchingView(sessionId, note) {
     ...(note ? [{ type: 'section', block_id: 'ps_identify', text: { type: 'mrkdwn', text: clip(note, 500) } }] : []),
     { type: 'context', block_id: 'ps_wait_note', elements: [{ type: 'mrkdwn', text: 'No order is placed. Installer approval is not granted.' }] },
   ]);
+}
+
+// Up to two follow-up questions from the identify step, each a pick list plus an optional typed answer.
+function questionView(sessionId, identified) {
+  const blocks = [];
+  const id = identified.identified || {};
+  const seen = [id.title, id.discontinued ? `Discontinued.${id.discontinuedNote ? ` ${id.discontinuedNote}` : ''}` : null].filter(Boolean).join('\n');
+  if (seen) blocks.push({ type: 'section', block_id: 'ps_seen', text: { type: 'mrkdwn', text: clip(`*Looks like:* ${esc(seen)}`, 2900) } });
+  if (identified.summary) blocks.push({ type: 'context', block_id: 'ps_ai_note', elements: [{ type: 'mrkdwn', text: clip(esc(identified.summary), 2900) }] });
+  identified.questions.forEach((question, index) => {
+    if (question.options.length) {
+      const options = question.options.map((text, i) => option(clip(text, 75), String(i)));
+      blocks.push(input(`ps_q${index}`, question.text, { type: 'static_select', action_id: 'answer', placeholder: plain('Pick one'), options }, true));
+    }
+    if (question.allowOther || !question.options.length) {
+      blocks.push(input(`ps_qo${index}`, question.options.length ? 'Or type it' : question.text, { type: 'plain_text_input', action_id: 'other', max_length: 120 }, true));
+    }
+  });
+  return {
+    type: 'modal',
+    callback_id: ANSWER,
+    private_metadata: meta(sessionId),
+    notify_on_close: true,
+    title: title('A quick question'),
+    submit: title('Search'),
+    close: title('Cancel'),
+    blocks: blocks.slice(0, 100),
+  };
+}
+
+// What the AI suggests buying, before the supplier rows. Suggestions only: prices come from suppliers.
+function recommendationBlocks(presented) {
+  const items = presented.recommendations || [];
+  if (!items.length) return [];
+  const label = { exact: 'Same item', replacement: 'Replacement for a discontinued model', alternative: 'Alternative' };
+  const lines = items.map(item => {
+    const name = item.title || [item.brand, item.model].filter(Boolean).join(' ');
+    const bits = [`*${esc(name)}* (${label[item.kind] || 'Alternative'})`];
+    if (item.why) bits.push(esc(item.why));
+    if (item.differences?.length) bits.push(item.differences.map(text => `– ${esc(text)}`).join('\n'));
+    const found = presented.foundBy?.[name];
+    if (found) bits.push(`Found at: ${esc(found)}`);
+    return bits.join('\n');
+  });
+  return [
+    { type: 'header', block_id: 'ps_h_recs', text: plain('Recommendations') },
+    { type: 'section', block_id: 'ps_recs', text: { type: 'mrkdwn', text: clip(lines.join('\n\n'), 2900) } },
+  ];
 }
 
 function statusView(sessionId, level, message) {
@@ -207,6 +256,7 @@ function resultsView(sessionId, presented, now = new Date()) {
     { type: 'alert', block_id: 'ps_readonly', level: 'info', text: { type: 'mrkdwn', text: 'Read only. Does not order. Installer approval is not granted. Edgar approval is still required.' } },
     ...(presented.liveNotice ? [{ type: 'alert', block_id: 'ps_live', level: 'warning', text: { type: 'mrkdwn', text: clip(presented.liveNotice, 200) } }] : []),
     { type: 'section', block_id: 'ps_query', text: { type: 'mrkdwn', text: clip(presented.summary, 2900) } },
+    ...recommendationBlocks(presented),
   ];
   const groups = [['exact', 'Exact matches'], ['equivalent', 'Candidate equivalents'], ['verify', 'Needs verification']];
   let index = 0;
@@ -238,6 +288,6 @@ function understoodLine(intent) {
 }
 
 module.exports = {
-  OPEN, RETRY, NEW, FORM, RESULTS, priceSearchHomeButton, priceSearchHomeEntry, appendPriceSearchHomeButton,
+  OPEN, RETRY, NEW, FORM, RESULTS, ANSWER, questionView, recommendationBlocks, priceSearchHomeButton, priceSearchHomeEntry, appendPriceSearchHomeButton,
   searchForm, searchingView, statusView, resultsView, understoodLine, priceLines, stockLines,
 };
