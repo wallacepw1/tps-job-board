@@ -76,9 +76,16 @@ test('DM button finds the card in Please Assign, and scheduling updates the DM',
  const p={type:'view_submission',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},view:{id:'V2',private_metadata:JSON.stringify(meta),state:{values:{own_date:{date:{selected_date:'2099-01-05'}},own_time:{time:{selected_time:'09:00'}}}}}};
  const out=await af.route(p,{fetch,TPS_BOT_TOKEN:'x',submitAssignment:async()=>({status:'done'}),pollMs:0});
  assert.match(out.routed,/Moved to Future Calls/);
- const upd=log.find(x=>x[0]==='chat.update');assert.ok(upd);assert.equal(upd[1].channel,'D0PAUL');assert.match(upd[1].text,/2099-01-05 09:00/);
+ const upd=log.find(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL');assert.ok(upd);assert.ok(log.find(x=>x[0]==='chat.update'&&x[1].channel==='C0C2XUL7ZHN'&&x[1].blocks.length===1));assert.equal(upd[1].channel,'D0PAUL');assert.match(upd[1].text,/2099-01-05 09:00/);
 });
 test('DM button with no matching card leaves routing alone',async()=>{
  const fetch=async url=>({json:async()=>({ok:true,messages:[]})});
  assert.equal(await af.findAssignCard(call,{fetch,TPS_BOT_TOKEN:'x'}),null);
+});
+test('scheduling takes the button off the card and keeps the other blocks',async()=>{
+ const log=[];const blocks=[{type:'rich_text',block_id:'wo_main'},{type:'actions',block_id:'tps_appfolio_pick',elements:[{action_id:'tps_appfolio_pick_time',value:JSON.stringify(call)}]},{type:'divider',block_id:'tpsref:RecZ1:1794299999.000200'},{type:'actions',block_id:'tps_card_resource_links',elements:[{action_id:'tps_resource_files'}]}];
+ const fetch=async(url,opts={})=>{if(url.includes('conversations.history'))return{json:async()=>({ok:true,messages:[{ts:'1794300000.000100',text:'132315',blocks}]})};const m=url.split('/').pop();log.push([m,JSON.parse(opts.body)]);return{json:async()=>({ok:true})};};
+ assert.equal(await af.removeButton({channel:'C0C2XUL7ZHN',cardTs:'1794300000.000100'},{fetch,TPS_BOT_TOKEN:'x'}),true);
+ const u=log.find(x=>x[0]==='chat.update')[1];assert.deepEqual(u.blocks.map(b=>b.block_id),['wo_main','tpsref:RecZ1:1794299999.000200','tps_card_resource_links']);assert.equal(u.text,'132315');
+ assert.equal(await af.removeButton({channel:'',cardTs:''},{fetch}),false);
 });
