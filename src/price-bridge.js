@@ -261,7 +261,11 @@ function registerPriceBridge(receiver, options = {}) {
       }
       const id = req.params?.id || String(req.url || '').match(/\/jobs\/([A-Za-z0-9_-]{8,80})\/result/)?.[1];
       if (!id) return res.status(404).json({ accepted: false, error: 'not_found' });
-      if (!validateResultPost(body).ok) return res.status(400).json({ accepted: false, error: 'invalid_result' });
+      // The collector posts its own field names (supplier_id, match_class, ...). Check the envelope against
+      // the contract after the same adaptation postResult applies, or every real result would be refused here.
+      const envelope = body && typeof body === 'object' && body.result && typeof body.result === 'object'
+        ? { ...body, result: adaptCollectorResult(body.result).schema } : body;
+      if (!validateResultPost(envelope).ok) return res.status(400).json({ accepted: false, error: 'invalid_result' });
       const out = bridge.postResult(id, body);
       if (out.status === 200 && !validateResultAck(out.body).ok) return res.status(500).json({ error: 'bridge_failed' });
       return res.status(out.status).json(out.body);

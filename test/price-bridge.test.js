@@ -73,3 +73,27 @@ test('disabled bridge is not advertised and a Mac endpoint is refused', async ()
   const ordered = { ...emptyResult, approvals: { ...emptyResult.approvals, autoPurchase: true } };
   assert.equal(validateResult(ordered).ok, false);
 });
+
+test('a real collector result, in the collector\'s own field names, is accepted through the route', async () => {
+  // Captured from tps-price-collector's execute path with a fake browser. Not a live supplier run.
+  const collectorResult = require('./fixtures/collector-execute-result.json');
+  const file = path.join(os.tmpdir(), `tps-price-collector-${Date.now()}.json`);
+  const bridge = createBridge({ file, enabled: true, now: () => 1_000 });
+  const heater = buildRequest({ requestId: collectorResult.requestId, queryType: 'model_text', modelHint: 'UCG80H1253N', categoryHint: 'water_heater', qty: 1, matchPriority: 'default' });
+  assert.equal(bridge.enqueue(heater, {}).ok, true);
+  const routes = routesFor(bridge);
+  const claimed = res();
+  await routes['/internal/tps-pricing/claim']({ rawBody: Buffer.from('{"workerId":"paul-pc","capabilities":["hirsch"]}'), headers: { authorization: `Bearer ${TOKEN}` } }, claimed);
+  const posted = res();
+  const body = { workerId: 'paul-pc', leaseId: claimed.body.job.leaseId, result: collectorResult };
+  await routes['/internal/tps-pricing/jobs/:id/result']({ params: { id: claimed.body.job.id }, rawBody: Buffer.from(JSON.stringify(body)), headers: { authorization: `Bearer ${TOKEN}` } }, posted);
+  assert.deepEqual(posted.body, { accepted: true });
+  const stored = bridge.get(claimed.body.job.id).result;
+  assert.equal(stored.priceRows[0].supplierId, 'hirsch');
+  assert.equal(stored.priceRows[0].price, '5994.60');
+  assert.equal(stored.candidates[0].matchClass, 'exact');
+  const junk = res();
+  await routes['/internal/tps-pricing/jobs/:id/result']({ params: { id: claimed.body.job.id }, rawBody: Buffer.from(JSON.stringify({ workerId: 'paul-pc', leaseId: 'x', result: 'nope' })), headers: { authorization: `Bearer ${TOKEN}` } }, junk);
+  assert.equal(junk.statusCode, 400);
+  fs.rmSync(file, { force: true });
+});
