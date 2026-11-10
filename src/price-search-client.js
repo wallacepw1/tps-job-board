@@ -3,6 +3,8 @@
 // A loopback or localhost URL is refused so this server never targets the Mac.
 
 const CONTRACT_VERSION = 'tps-price-v1';
+// The AI identify step can run a web search. The identify host holds a request for at most 100 seconds.
+const IDENTIFY_TIMEOUT_MS = 95000;
 
 function loopbackHost(hostname) {
   const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -14,7 +16,8 @@ function loopbackHost(hostname) {
 function priceSearchConfig(env = process.env) {
   const enabled = env.PRICE_SEARCH_ENABLED === '1';
   const url = String(env.PRICE_SEARCH_IDENTIFY_URL || '').trim();
-  const token = String(env.PRICE_SEARCH_IDENTIFY_TOKEN || '').trim();
+  // The identify scenario checks the same internal key the other TPS automations use.
+  const token = String(env.PRICE_SEARCH_IDENTIFY_TOKEN || env.TPS_INTERNAL_KEY || '').trim();
   const bridgeToken = String(env.TPS_PRICE_BRIDGE_TOKEN || '');
   let identifyConfigured = false;
   let rejectedLoopback = false;
@@ -65,6 +68,46 @@ function buildRequest(input, env = process.env) {
   return request;
 }
 
+const short = (value, max) => {
+  const text = value == null ? '' : String(value).replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, max) : null;
+};
+
+// Follow-up questions the identify step asks when it cannot tell the size, fuel, model, and so on.
+function questionsFrom(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 2).map((item, index) => ({
+    id: (short(item?.id, 40) || `q${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '_'),
+    text: short(item?.text, 150),
+    options: (Array.isArray(item?.options) ? item.options : []).map(option => short(option, 70)).filter(Boolean).slice(0, 6),
+    allowOther: item?.allowOther !== false,
+  })).filter(item => item.text);
+}
+
+// Recommendations and alternatives from the identify step. These are suggestions, never prices.
+function aiExtras(body) {
+  const recommendations = (Array.isArray(body?.recommendations) ? body.recommendations : []).slice(0, 4).map(item => ({
+    kind: ['exact', 'replacement', 'alternative'].includes(item?.kind) ? item.kind : 'alternative',
+    brand: short(item?.brand, 80),
+    model: short(item?.model, 80),
+    partNumber: short(item?.partNumber, 80),
+    title: short(item?.title, 200),
+    why: short(item?.why, 300),
+    differences: (Array.isArray(item?.differences) ? item.differences : []).map(text => short(text, 160)).filter(Boolean).slice(0, 4),
+    searchTerms: (Array.isArray(item?.searchTerms) ? item.searchTerms : []).map(text => short(text, 80)).filter(Boolean).slice(0, 3),
+  })).filter(item => item.title || item.model);
+  const id = body?.identify && typeof body.identify === 'object' && !Array.isArray(body.identify) ? body.identify : {};
+  const identified = {
+    title: short(id.title, 200),
+    brand: short(id.brand, 80),
+    model: short(id.model, 80),
+    partNumber: short(id.partNumber, 80),
+    size: short(id.size, 60),
+    discontinued: id.discontinued === true,
+    discontinuedNote: short(id.discontinuedNote, 300),
+  };
+  return { recommendations, identified, summary: short(body?.summary, 400) };
+}
+
 function normalizeIdentify(body) {
   const { enrichmentFrom } = require('./price-contract');
   const error = body?.error && typeof body.error === 'object' ? {
@@ -81,23 +124,27 @@ function normalizeIdentify(body) {
   if (error || body?.status === 'error' || body?.ok === false) return { status: 'error', error: error || { code: 'identify_failed', message: 'Identification could not be completed.', retryable: true } };
   const mapped = enrichmentFrom(body);
   if (!mapped.ok) return { status: 'error', error: { code: 'identify_failed', message: 'Identification could not be queued.', retryable: true } };
-  return { status: 'complete', identifiedSpecs: mapped.identifiedSpecs, candidateHints: mapped.candidateHints, categoryHint: mapped.categoryHint, enrichment: mapped.enrichment };
+  const ai = aiExtras(body);
+  const questions = body?.status === 'needs_answer' ? questionsFrom(body.questions) : [];
+  return { status: questions.length ? 'needs_answer' : 'complete', questions, ...ai, identifiedSpecs: mapped.identifiedSpecs, candidateHints: mapped.candidateHints, categoryHint: mapped.categoryHint, enrichment: mapped.enrichment };
 }
 
 function createPriceClient({ env = process.env, fetch: fetcher = global.fetch } = {}) {
   const cfg = priceSearchConfig(env);
   return {
     config: { enabled: cfg.enabled, identifyConfigured: cfg.identifyConfigured, bridgeConfigured: cfg.bridgeConfigured },
-    async identify(request, photo) {
+    async identify(request, photo, answers) {
       if (!cfg.enabled) return { status: 'disabled' };
       if (!cfg.identifyConfigured) return { status: 'unconfigured', error: { code: 'identify_not_configured', message: 'Model and photo identification is not connected.', retryable: false } };
       const body = { ...request };
       if (photo?.fileContent) body.fileContent = photo.fileContent;
+      if (Array.isArray(answers) && answers.length) body.answers = answers.slice(0, 4);
+      body.key = cfg.token;
       const res = await fetcher(cfg.url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(IDENTIFY_TIMEOUT_MS),
         redirect: 'error',
       });
       const text = await res.text();
@@ -108,4 +155,4 @@ function createPriceClient({ env = process.env, fetch: fetcher = global.fetch } 
   };
 }
 
-module.exports = { CONTRACT_VERSION, priceSearchConfig, publicStatus, buildRequest, createPriceClient, normalizeIdentify, loopbackHost };
+module.exports = { CONTRACT_VERSION, questionsFrom, aiExtras, priceSearchConfig, publicStatus, buildRequest, createPriceClient, normalizeIdentify, loopbackHost };

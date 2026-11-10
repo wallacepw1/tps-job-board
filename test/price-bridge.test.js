@@ -53,7 +53,7 @@ test('an expired lease is rejected and the job is queued again', () => {
   const bridge = createBridge({ file: null, enabled: true, now: () => time });
   assert.equal(bridge.enqueue(request).ok, true);
   const claimed = bridge.claim({ workerId: 'mac', capabilities: ['hirsch', 'winsupply'] });
-  time = 1000 + 180000;
+  time = 1000 + 8 * 60 * 1000;
   const late = bridge.postResult(claimed.job.id, { workerId: 'mac', leaseId: claimed.job.leaseId, result: emptyResult });
   assert.equal(late.status, 409);
   assert.equal(late.body.error, 'wrong_lease');
