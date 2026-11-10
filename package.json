@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@slack/bolt": "^4.1.0",
+    "ajv": "^8.20.0",
     "node-ical": "^0.20.1"
   }
 }

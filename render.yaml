@@ -35,6 +35,14 @@ services:
         sync: false
       - key: TPS_ASSISTANT_BOT_TOKEN
         sync: false
+      - key: PRICE_SEARCH_ENABLED
+        sync: false
+      - key: PRICE_SEARCH_IDENTIFY_URL
+        sync: false
+      - key: PRICE_SEARCH_IDENTIFY_TOKEN
+        sync: false
+      - key: TPS_PRICE_BRIDGE_TOKEN
+        sync: false
       - key: PHONECOM_SYNC_MODE
         value: report
       - key: PUBLIC_URL
