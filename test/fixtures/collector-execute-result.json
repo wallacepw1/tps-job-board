@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "mode": "execute",
+  "status": "completed_with_gaps",
+  "stopped": null,
+  "live_supplier_run": true,
+  "live_verified_adapters": [],
+  "collector": {
+    "linked": true,
+    "liveRun": true,
+    "evidenceKind": "live_dom",
+    "httpEndpoint": null,
+    "bridge": "outbound_mac_worker"
+  },
+  "supplierErrors": [
+    {
+      "supplierId": "reece_us",
+      "code": "not_executed",
+      "message": "execution_disabled",
+      "retryable": false
+    },
+    {
+      "supplierId": "homedepot",
+      "code": "not_executed",
+      "message": "execution_disabled",
+      "retryable": false
+    },
+    {
+      "supplierId": "lowes",
+      "code": "not_executed",
+      "message": "execution_disabled",
+      "retryable": false
+    },
+    {
+      "supplierId": "supplyhouse",
+      "code": "excluded_by_source_policy",
+      "message": "TPS does not buy water heaters from SupplyHouse or Master Builder Mercantile. Hirsch, Reece, Home Depot, Lowe's, and Winsupply stay in scope. Winsupply is not browser-validated. No commercial-size exclusion is applied.",
+      "retryable": false
+    },
+    {
+      "supplierId": "masterbuildermercantile",
+      "code": "excluded_by_source_policy",
+      "message": "TPS does not buy water heaters from SupplyHouse or Master Builder Mercantile. Hirsch, Reece, Home Depot, Lowe's, and Winsupply stay in scope. Winsupply is not browser-validated. No commercial-size exclusion is applied.",
+      "retryable": false
+    },
+    {
+      "supplierId": "winsupply",
+      "code": "company_chosen_selectors_pending",
+      "message": "product_selectors_not_captured",
+      "retryable": false
+    }
+  ],
+  "product_category": "water_heater",
+  "query": "UCG80H1253N",
+  "routing": {
+    "policy_id": "water_heater",
+    "policy_status": "matched",
+    "heater_rules_applied": true,
+    "reason": "TPS does not buy water heaters from SupplyHouse or Master Builder Mercantile. Hirsch, Reece, Home Depot, Lowe's, and Winsupply stay in scope. Winsupply is not browser-validated. No commercial-size exclusion is applied."
+  },
+  "suppliers": [
+    {
+      "supplier_id": "hirsch",
+      "adapter_status": "selectors_observed_not_live_run",
+      "price_collected": false,
+      "executed": true,
+      "status": "executed",
+      "reason": null,
+      "planned_url": "https://www.hirsch.com/search?q=UCG80H1253N&index=hirschpipe_Production_Product_Default_hirschpipe_en-US",
+      "url_template_status": "observed_visible_address",
+      "live_verified": false
+    },
+    {
+      "supplier_id": "reece",
+      "adapter_status": "observed_dom_not_live_run",
+      "price_collected": false,
+      "executed": false,
+      "status": "not_executed",
+      "reason": "execution_disabled",
+      "planned_url": null,
+      "url_template_status": "not_configured",
+      "live_verified": false
+    },
+    {
+      "supplier_id": "home_depot",
+      "adapter_status": "pending_not_live_validated",
+      "price_collected": false,
+      "executed": false,
+      "status": "not_executed",
+      "reason": "execution_disabled",
+      "planned_url": null,
+      "url_template_status": "not_configured",
+      "live_verified": false
+    },
+    {
+      "supplier_id": "lowes",
+      "adapter_status": "pending_not_live_validated",
+      "price_collected": false,
+      "executed": false,
+      "status": "not_executed",
+      "reason": "execution_disabled",
+      "planned_url": null,
+      "url_template_status": "not_configured",
+      "live_verified": false
+    },
+    {
+      "supplier_id": "supplyhouse",
+      "adapter_status": "selectors_observed_not_live_run",
+      "price_collected": false,
+      "executed": false,
+      "status": "excluded_by_source_policy",
+      "reason": "TPS does not buy water heaters from SupplyHouse or Master Builder Mercantile. Hirsch, Reece, Home Depot, Lowe's, and Winsupply stay in scope. Winsupply is not browser-validated. No commercial-size exclusion is applied.",
+      "planned_url": null
+    },
+    {
+      "supplier_id": "master_builder_mercantile",
+      "adapter_status": "selectors_observed_not_live_run",
+      "price_collected": false,
+      "executed": false,
+      "status": "excluded_by_source_policy",
+      "reason": "TPS does not buy water heaters from SupplyHouse or Master Builder Mercantile. Hirsch, Reece, Home Depot, Lowe's, and Winsupply stay in scope. Winsupply is not browser-validated. No commercial-size exclusion is applied.",
+      "planned_url": null
+    },
+    {
+      "supplier_id": "winsupply",
+      "adapter_status": "company_verified_product_selectors_pending",
+      "price_collected": false,
+      "executed": false,
+      "status": "company_verified_product_selectors_pending",
+      "reason": "product_selectors_not_captured",
+      "planned_url": null,
+      "price_status": "unknown",
+      "stock_status": "unknown",
+      "requested_company": "WinSupply of South San Diego (National City)",
+      "company_applied": false,
+      "company_candidates": [
+        {
+          "name": "Winsupply of South San Diego",
+          "distance": "2.56 miles away",
+          "address": "1403 Cleveland Ave, National City, CA 91950",
+          "industries": [
+            "Plumbing"
+          ],
+          "company_url": null,
+          "selected": false
+        },
+        {
+          "name": "Winsupply of El Cajon",
+          "distance": "14.09 miles away",
+          "address": "1947 John Towers Ave, El Cajon, CA 92020",
+          "industries": [
+            "Plumbing"
+          ],
+          "company_url": null,
+          "selected": false
+        },
+        {
+          "name": "Winsupply of San Diego",
+          "distance": "17.46 miles away",
+          "address": "6695 Rasha Street, San Diego, CA 92121",
+          "industries": [
+            "Industrial",
+            "Plumbing"
+          ],
+          "company_url": null,
+          "selected": false
+        }
+      ]
+    }
+  ],
+  "ranked_matches": [
+    {
+      "candidate_id": "cand-1",
+      "supplier_id": "hirsch",
+      "manufacturer": null,
+      "model": "UCG80H1253N",
+      "part_number": "UCG80H1253N",
+      "title": "Bradford White UCG80H1253N",
+      "product_url": "https://www.hirsch.com/products/-bradford-white-ucg80h1253n/x",
+      "product_url_status": "allowlisted",
+      "image": {
+        "url": "https://www.hirsch.com/img/x.jpg",
+        "alt": "heater"
+      },
+      "evidence_kind": "live_dom",
+      "live_observation": true,
+      "checked_at": "2026-11-10T02:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "match_class": "exact",
+      "approved_as_equivalent": true,
+      "approved_for_purchase": false,
+      "tradeoffs": [],
+      "blockers": [],
+      "missing": [
+        "heater_filters"
+      ],
+      "comparison": {
+        "input_btu": null,
+        "recovery_temperature_rise": null,
+        "recovery_gph": null,
+        "vent_type": null,
+        "vent_material": null,
+        "emissions": null,
+        "gallons": null,
+        "fuel": null,
+        "dimensions": null
+      },
+      "price": {
+        "price_type": "authenticated_unknown",
+        "price_decimal": "5994.60",
+        "currency": null,
+        "currency_symbol": null,
+        "raw_price_text": "$5,994.60",
+        "list_price_decimal": null,
+        "list_price_raw": "$8,820.00",
+        "previous_price_raw": null,
+        "uom": null,
+        "provenance": "live_dom_this_run"
+      },
+      "previous_price_raw": null,
+      "list_price_raw": "$8,820.00",
+      "delivery_buckets": [],
+      "stock": {
+        "orderable": null,
+        "local_stock_status": "out_of_stock",
+        "nearby_stock_status": "not_observed",
+        "network_stock_status": "displayed_zero",
+        "confirmation_required": false,
+        "guaranteed_stock": false,
+        "eta_text": null,
+        "branches": [
+          {
+            "name": "Chula Vista",
+            "scope": "local",
+            "quantity": "0",
+            "quantity_provenance": "explicit_cell",
+            "eta_text": null,
+            "eta_provenance": "not_displayed"
+          },
+          {
+            "name": "All Warehouses",
+            "scope": "network",
+            "quantity": "0",
+            "quantity_provenance": "explicit_cell",
+            "eta_text": null,
+            "eta_provenance": "not_displayed"
+          }
+        ]
+      },
+      "freshness": {
+        "collected_at": "2026-11-10T02:00:00.000Z",
+        "stale_after": "2026-11-10T14:00:00.000Z",
+        "staleness": "fresh"
+      },
+      "session_state": "observed_signed_in"
+    }
+  ],
+  "other_candidates": [],
+  "freshness": {
+    "staleness": "fresh",
+    "stale_window_hours": 12
+  },
+  "identify": {
+    "category": "water_heater",
+    "provenance": "local_collector",
+    "unknowns": []
+  },
+  "candidates": [
+    {
+      "supplier_id": "hirsch",
+      "title": "Bradford White UCG80H1253N",
+      "brand": null,
+      "model": "UCG80H1253N",
+      "match_class": "exact",
+      "evidence_kind": "live_dom",
+      "live_observation": true,
+      "checked_at": "2026-11-10T02:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "filter_pass": true,
+      "product_url": "https://www.hirsch.com/products/-bradford-white-ucg80h1253n/x",
+      "image": {
+        "url": "https://www.hirsch.com/img/x.jpg",
+        "alt": "heater"
+      },
+      "differences": [],
+      "missing_details": [
+        "heater_filters"
+      ],
+      "freshness": {
+        "collected_at": "2026-11-10T02:00:00.000Z",
+        "stale_after": "2026-11-10T14:00:00.000Z",
+        "staleness": "fresh"
+      }
+    }
+  ],
+  "priceRows": [
+    {
+      "supplier_id": "hirsch",
+      "product_url": "https://www.hirsch.com/products/-bradford-white-ucg80h1253n/x",
+      "evidence_kind": "live_dom",
+      "live_observation": true,
+      "checked_at": "2026-11-10T02:00:00.000Z",
+      "auth": {
+        "signedInMarker": "observed",
+        "netLabelVerified": false,
+        "priceKind": "authenticated_unknown",
+        "displayLabel": "signed_in_net_unverified"
+      },
+      "image_url": "https://www.hirsch.com/img/x.jpg",
+      "image_alt": "heater",
+      "image": {
+        "url": "https://www.hirsch.com/img/x.jpg",
+        "alt": "heater"
+      },
+      "price": "5994.60",
+      "price_kind": "authenticated_unknown",
+      "currency": null,
+      "raw_price_text": "$5,994.60",
+      "previous_price_raw": null,
+      "list_price_raw": "$8,820.00",
+      "availability": {
+        "local": "out_of_stock",
+        "nearby": "not_observed",
+        "network": "displayed_zero",
+        "available_to_order": null,
+        "needs_confirmation": false,
+        "guaranteed_stock": false
+      },
+      "delivery_buckets": [],
+      "other_branches": [
+        {
+          "name": "Chula Vista",
+          "scope": "local",
+          "quantity": "0",
+          "quantityProvenance": "explicit_cell",
+          "etaText": null,
+          "etaProvenance": "not_displayed",
+          "guaranteedStock": false
+        },
+        {
+          "name": "All Warehouses",
+          "scope": "network",
+          "quantity": "0",
+          "quantityProvenance": "explicit_cell",
+          "etaText": null,
+          "etaProvenance": "not_displayed",
+          "guaranteedStock": false
+        }
+      ],
+      "freshness": {
+        "collected_at": "2026-11-10T02:00:00.000Z",
+        "stale_after": "2026-11-10T14:00:00.000Z",
+        "staleness": "fresh"
+      }
+    }
+  ],
+  "uiHints": {
+    "surface": "tps_assistant_app_home_modal",
+    "autoPurchase": false,
+    "showImages": true,
+    "exact": "exact",
+    "equivalent": "suitable_equivalent"
+  },
+  "approvals": {
+    "edgarApprovalRequired": true,
+    "installerConfirmRequired": true,
+    "autoPurchase": false
+  },
+  "approval": {
+    "approved_for_purchase": false,
+    "note": "Installer or Edgar approval stays outside this service. No purchase, quote, or order is created."
+  },
+  "integration": {
+    "surface": "Existing TPS Assistant Slack App Home calls this local service. This package does not replace that app or the job board.",
+    "lifecycle": [
+      "accepted",
+      "running",
+      "completed|completed_with_gaps|stopped|error"
+    ]
+  },
+  "contractVersion": "tps-price-v1",
+  "requestId": "req-2"
+}
