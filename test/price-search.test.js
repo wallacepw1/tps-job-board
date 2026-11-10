@@ -47,16 +47,19 @@ test('gallon keyword, electric, and smaller gas heaters are not commercial 120k 
     { title: 'A.O. Smith 80 Gallon Commercial Heat Pump Water Heater', model: 'HP-80' },
     { title: 'A.O. Smith 50 Gallon 76000 BTU Natural Gas Power Vent', model: 'G-76' },
     { title: 'Standard residential 80 gallon 40000 BTU natural gas', model: 'R-80' },
-    { title: 'Bradford White 80 Gallon 125000 BTU Natural Gas Commercial metal', model: 'BW-125', supplierId: 'winsupply', evidenceKind: 'supplied_observation', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '125000', ventMaterial: 'metal' } },
-    { title: 'Rheem 80 Gallon 120000 BTU Natural Gas Commercial metal', model: 'RH-120', supplierId: 'lowes', evidenceKind: 'supplied_observation', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' }, image: { url: 'https://example.com/rheem.jpg', alt: 'Rheem commercial tank', relation: 'displayed_image' } },
-    { title: 'A.O. Smith 80 Gallon 120000 BTU Natural Gas Commercial metal', model: 'AOS-120', supplierId: 'hirsch', evidenceKind: 'supplied_observation', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' }, image: { url: 'http://example.com/not-used.jpg', relation: 'displayed_image' } },
+    { title: 'Bradford White 80 Gallon 125000 BTU Natural Gas Commercial metal', model: 'BW-125', supplierId: 'winsupply', evidenceKind: 'live_dom', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '125000', ventMaterial: 'metal' } },
+    { title: 'Rheem 80 Gallon 120000 BTU Natural Gas Commercial metal', model: 'RH-120', supplierId: 'lowes', evidenceKind: 'live_dom', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' }, image: { url: 'https://example.com/rheem.jpg', alt: 'Rheem commercial tank', relation: 'displayed_image' } },
+    { title: 'A.O. Smith 80 Gallon 120000 BTU Natural Gas Commercial metal', model: 'AOS-120', supplierId: 'hirsch', evidenceKind: 'live_dom', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' }, image: { url: 'http://example.com/not-used.jpg', relation: 'displayed_image' } },
+    { title: 'Hint only 80 Gallon 120000 BTU Natural Gas', model: 'HINT-1', supplierId: 'hirsch', matchClass: 'exact', filterPass: true, evidenceKind: 'candidate_hint', comparison: { fuel: 'natural gas', gallons: '80', inputBtu: '120000', ventMaterial: 'metal' } },
   ], priceRows: [
     { supplierId: 'winsupply', price: null, priceKind: 'not_configured', guaranteedStock: false, availability: { network: 'In Network (6)', raw: 'Call to Confirm Availability', needsConfirmation: true, guaranteedStock: false }, otherBranches: [{ name: 'Local branch', location: 'Local branch', scope: 'local', quantity: '1', quantityProvenance: 'explicit_cell', needsConfirmation: false, guaranteedStock: false }, { name: 'East branch', scope: 'other_branch', quantity: '2', etaText: 'Thursday', etaProvenance: 'displayed_text', needsConfirmation: true, guaranteedStock: false }] },
     { supplierId: 'supplyhouse', price: '49.00', priceKind: 'public', guaranteedStock: false },
     { supplierId: 'lowes', price: '12.00', priceKind: 'authenticated_unknown', guaranteedStock: false },
-  ], collector: { linked: false, liveRun: false, evidenceKind: 'not_collected', httpEndpoint: null, bridge: 'outbound_mac_worker' } });
+  ], collector: { linked: true, liveRun: true, evidenceKind: 'live_dom', httpEndpoint: null, bridge: 'outbound_mac_worker' } });
   const titles = group => result.groups[group].map(item => item.model);
   assert.deepEqual(titles('equivalent'), ['AOS-120', 'BW-125', 'RH-120']);
+  assert.ok(titles('verify').includes('HINT-1'));
+  assert.equal(titles('exact').includes('HINT-1'), false);
   assert.deepEqual(titles('exact'), []);
   assert.ok(['E-123', 'E-18', 'G-75', 'HP-80', 'G-76', 'R-80'].every(model => titles('rejected').includes(model)));
   const view = JSON.stringify(resultsView('session-1', result, new Date('2026-11-09T23:00:00Z')));
@@ -72,25 +75,28 @@ test('gallon keyword, electric, and smaller gas heaters are not commercial 120k 
   assert.doesNotMatch(view, /\*SupplyHouse\*/);
   assert.match(view, /WinSupply/);
   assert.doesNotMatch(view, /\$|49\.00|12\.00|Add to Cart|Add to List/);
-  assert.match(view, /Account login required/);
+  assert.match(view, /login_required/);
+  assert.match(view, /Input hypothesis is not product evidence/);
   assert.match(view, /Not a confirmed net price/);
   assert.match(view, /Installer approval is not granted/);
 });
 
 test('null and unproven prices never become amounts', () => {
   const live = { linked: true, liveRun: true, evidenceKind: 'live_dom', httpEndpoint: null };
-  assert.match(priceLines({ price: null, priceKind: 'not_configured' }, { linked: false }).join(' '), /collector not linked/);
+  assert.match(priceLines({ price: null, priceKind: 'not_configured' }, { linked: false }).join(' '), /not_validated/);
+  assert.match(priceLines({ price: null, priceKind: 'not_configured' }, { linked: false }).join(' '), /not linked/);
   assert.match(priceLines({ price: '19.99', priceKind: 'authenticated_unknown', guaranteedStock: false }, live).join(' '), /Not a confirmed net price/);
   assert.doesNotMatch(priceLines({ price: '19.99', priceKind: 'authenticated_unknown' }, live).join(' '), /19\.99/);
   assert.match(priceLines({ price: '20.00', priceKind: 'public', currency: 'USD', uom: 'each', rawPriceText: '20.00', freshness: { observedAt: '2026-11-09T00:00:00Z' }, guaranteedStock: false }, live).join('\n'), /Displayed price 20\.00 · USD · each/);
   assert.match(priceLines({ price: '30.00', priceKind: 'list', currency: 'USD', guaranteedStock: false }, live).join('\n'), /Factory list 30\.00/);
   assert.doesNotMatch(priceLines({ supplierId: 'winsupply', price: '$5,670.79', priceKind: 'public', guaranteedStock: false }, live).join(' '), /5,670/);
-  assert.match(priceLines({ supplierId: 'winsupply', price: '$5,670.79', priceKind: 'public', guaranteedStock: false }, live).join(' '), /Account login required/);
-  const stock = stockLines({ availability: { network: 'In Network (4)', needsConfirmation: true, guaranteedStock: false, availableToOrder: true } }).join(' ');
-  assert.match(stock, /unconfirmed/);
-  assert.match(stock, /Available to order — not stock/);
-  assert.match(stockLines({ availability: { guaranteedStock: false } }).join(' '), /Stock network unknown/);
-  assert.doesNotMatch(stockLines({ availability: { guaranteedStock: false } }).join(' '), /None in stock/);
+  assert.match(priceLines({ supplierId: 'winsupply', price: '$5,670.79', priceKind: 'public', guaranteedStock: false }, live).join(' '), /login_required/);
+  assert.match(priceLines({ supplierId: 'masterbuildermercantile', price: '10.00', priceKind: 'unsupported', guaranteedStock: false }, live).join(' '), /not_validated/);
+  const liveStock = stockLines({ availability: { network: 'In Network (4)', needsConfirmation: true, guaranteedStock: false, availableToOrder: true } }, live).join(' ');
+  assert.match(liveStock, /unconfirmed/);
+  assert.match(liveStock, /Available to order — not stock/);
+  assert.match(stockLines({ availability: { local: 'In Stock (9)', guaranteedStock: false } }).join(' '), /not_validated/);
+  assert.doesNotMatch(stockLines({ availability: { local: 'In Stock (9)', guaranteedStock: false } }).join(' '), /In stock \(9\)/);
 });
 
 test('unconfigured client does not call the network or invent a price', async () => {
@@ -174,6 +180,21 @@ test('the Job Board Home is unchanged and an Assistant Home keeps its existing c
   assert.equal(next.blocks[1].elements[0].action_id, 'tps_price_search_open');
   assert.equal(appendPriceSearchHomeButton(home, false), home);
   for (const view of [searchForm('s'), searchingView('s'), priceSearchHomeEntry()]) assert.equal(JSON.stringify(view).includes('Add to Cart'), false);
+});
+
+test('with the feature flag off, the price button stays on the existing Assistant path', async () => {
+  const sent = [];
+  const routes = {};
+  delete process.env.PRICE_SEARCH_ENABLED;
+  registerAssistantEventsProxy({ router: { post: (path, handler) => { routes[path] = handler; }, get: () => {} } }, { secret: 'fixture-signing', fetch: async url => { sent.push(url); return { ok: true, status: 200, text: async () => '' }; } });
+  const payload = { type: 'block_actions', team: { id: TEAM }, user: { id: ADMIN }, trigger_id: 'trig', actions: [{ action_id: 'tps_price_search_open', value: 'open' }] };
+  const raw = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
+  const ts = String(Math.floor(Date.now() / 1000));
+  const headers = { 'x-slack-request-timestamp': ts, 'x-slack-signature': 'v0=' + createHmac('sha256', 'fixture-signing').update(`v0:${ts}:${raw}`).digest('hex') };
+  const res = { status(code) { this.code = code; return this; }, send() { return this; }, json() { return this; }, type() { return this; } };
+  await routes['/slack/assistant-events']({ rawBody: Buffer.from(raw), headers }, res);
+  assert.equal(sent.length, 1);
+  assert.equal(sent.some(url => String(url).includes('views.open')), false);
 });
 
 test('price files do not carry a backend host, and the flag keeps other Assistant actions on their current path', async () => {

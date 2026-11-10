@@ -145,12 +145,31 @@ function createBridge({ file = defaultFile(), now = Date.now, enabled = false, t
     next.attempts += 1;
     persist();
     const response = { job: { id: next.id, leaseId: next.leaseId, request: next.request } };
-    if (!validateClaimResponse(response).ok) return { job: null };
+    if (!validateClaimResponse(response).ok) {
+      next.status = 'queued';
+      next.workerId = null;
+      next.leaseId = null;
+      next.leaseExpiresAt = null;
+      next.attempts -= 1;
+      persist();
+      return { job: null };
+    }
     return response;
   }
 
   function postResult(id, body) {
-    sweep();
+    recover();
+    const time = now();
+    const pending = jobs.get(id);
+    if (pending && pending.status === 'leased' && body?.workerId === pending.workerId && body?.leaseId === pending.leaseId && !(pending.leaseExpiresAt > time)) {
+      pending.leaseId = null;
+      pending.workerId = null;
+      pending.leaseExpiresAt = null;
+      pending.status = pending.attempts >= MAX_ATTEMPTS || pending.expiresAt <= time ? 'expired' : 'queued';
+      persist();
+      return { status: 409, body: { accepted: false, error: 'wrong_lease' } };
+    }
+    sweep(time);
     const job = jobs.get(id);
     if (!job) return { status: 404, body: { accepted: false, error: 'not_found' } };
     if (!body || body.workerId !== job.workerId) return { status: 409, body: { accepted: false, error: 'foreign_job' } };

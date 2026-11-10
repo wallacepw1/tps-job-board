@@ -111,21 +111,26 @@ function statusView(sessionId, level, message) {
   ]);
 }
 
+function liveCapture(collector) {
+  return collector?.linked === true && collector?.liveRun === true && collector?.evidenceKind === 'live_dom' && collector?.httpEndpoint == null;
+}
+
 function livePrice(row, collector) {
   const kind = String(row.priceKind || '');
-  const live = collector?.linked === true && collector?.liveRun === true && ['live_dom', 'supplied_observation'].includes(collector?.evidenceKind) && collector?.httpEndpoint == null;
-  return live && ['verified_account_net', 'public', 'list'].includes(kind) && typeof row.price === 'string' && row.price.trim();
+  return liveCapture(collector) && ['verified_account_net', 'public', 'list'].includes(kind) && typeof row.price === 'string' && row.price.trim();
 }
 
 function priceLines(row, collector) {
   const kind = String(row.priceKind || '');
   const { ACCOUNT_PRICE_SUPPLIERS } = require('./price-search-policy');
-  if (ACCOUNT_PRICE_SUPPLIERS.includes(row.supplierId) && kind !== 'verified_account_net') return ['Account login required. Guest price is not shown. Price unverified.'];
+  const account = ACCOUNT_PRICE_SUPPLIERS.includes(row.supplierId);
+  if (account && kind !== 'verified_account_net') return ['login_required. Account price not_validated. Guest price is not shown.'];
+  if (account && !liveCapture(collector)) return ['not_validated. Account price is not shown until a live signed-in check.'];
   if (!livePrice(row, collector)) {
-    if (kind === 'authenticated_unknown') return ['Account price unknown. Not a confirmed net price.'];
-    if (kind === 'unsupported') return ['Price unsupported for this supplier.'];
-    if (kind === 'not_configured' || collector?.linked === false) return ['Price unknown (collector not linked).'];
-    return ['Price unknown.'];
+    if (kind === 'authenticated_unknown') return ['login_required. Account price not_validated. Not a confirmed net price.'];
+    if (kind === 'unsupported') return ['unsupported. login_required. Price not_validated.'];
+    if (kind === 'not_configured' || collector?.linked === false) return ['not_validated. Price unknown. Collector is not linked.'];
+    return ['not_validated. Price unknown.'];
   }
   const name = kind === 'list' ? 'Factory list' : kind === 'verified_account_net' ? 'Account net' : 'Displayed price';
   const shown = row.rawPriceText ? esc(row.rawPriceText) : esc(row.price);
@@ -133,7 +138,8 @@ function priceLines(row, collector) {
   return [`${name} ${shown} · ${esc(row.currency || 'currency unknown')} · ${esc(row.uom || 'unit unknown')} · ${esc(when)}`];
 }
 
-function stockLines(row) {
+function stockLines(row, collector) {
+  if (!liveCapture(collector)) return ['Stock not_validated. Not a live check.'];
   const lines = [];
   const availability = row.availability || {};
   const branches = Array.isArray(row.otherBranches) ? row.otherBranches : [];
@@ -159,7 +165,7 @@ function stockLines(row) {
 function supplierLine(row, collector) {
   const known = supplierName(row.supplierId || row.supplier);
   const name = known ? known.name : 'Unknown supplier';
-  return `*${esc(name)}*\n${[...priceLines(row, collector), ...stockLines(row)].join('\n')}`;
+  return `*${esc(name)}*\n${[...priceLines(row, collector), ...stockLines(row, collector)].join('\n')}`;
 }
 
 function productBlocks(item, index) {
@@ -172,7 +178,7 @@ function productBlocks(item, index) {
     subtitle: { type: 'plain_text', text: badge },
     body: { type: 'mrkdwn', text: clip(esc(summary), 200) },
   };
-  const image = imageEvidence(item.imageUrl, item.title || 'Product photo from the supplier');
+  const image = item.observed ? imageEvidence(item.imageUrl, item.title || 'Product photo from the supplier') : null;
   if (image && !item.illustrative) card.hero_image = { type: 'image', image_url: image.url, alt_text: image.alt };
   const notes = [...(item.differences || []), ...(item.reasons || [])];
   if (!image) notes.unshift('No product image from the supplier.');

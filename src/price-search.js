@@ -122,11 +122,12 @@ function presentResult(input, result) {
       collector,
     };
     const judged = classifyCandidate(intent, item);
-    const observed = ['live_dom', 'supplied_observation'].includes(raw.evidenceKind);
+    const observed = raw.evidenceKind === 'live_dom' && collector.linked === true && collector.liveRun === true && collector.httpEndpoint == null;
     let kind = raw.evidenceKind === 'fixture' || raw.filterPass === false || judged.kind === 'rejected' || raw.matchClass === 'not_equivalent' ? 'rejected' : raw.matchClass === 'exact' && judged.kind === 'exact' ? 'exact' : ['candidate_equivalent', 'suitable_equivalent', 'tradeoff'].includes(raw.matchClass) ? 'equivalent' : ['insufficient_evidence', 'unknown'].includes(raw.matchClass) ? 'verify' : judged.kind;
     if ((kind === 'exact' || kind === 'equivalent') && !observed) kind = 'verify';
-    const unverified = (kind === 'verify' && !observed) ? ['Unverified until a manufacturer or product page spec is collected.'] : [];
-    return { ...item, ...judged, kind, rows: rowsFor({ ...item, supplierId: raw.supplierId }, rows), differences: [...item.differences, ...judged.tradeoffs, ...unverified, ...(illustrative ? ['Supplier illustration is not confirmed as this exact model.'] : []), ...(raw.evidenceKind === 'fixture' ? ['Fixture evidence is not a live product.'] : [])] };
+    const hypothesis = raw.evidenceKind === 'candidate_hint' || raw.evidenceKind == null;
+    const unverified = !observed ? [`not_validated. ${hypothesis ? 'Input hypothesis is not product evidence.' : 'A manufacturer or product page spec was not collected.'}`] : [];
+    return { ...item, ...judged, kind, observed, rows: rowsFor({ ...item, supplierId: raw.supplierId }, rows), differences: [...item.differences, ...judged.tradeoffs, ...unverified, ...(illustrative ? ['Supplier illustration is not confirmed as this exact model.'] : []), ...(raw.evidenceKind === 'fixture' ? ['Fixture evidence is not a live product.'] : [])] };
   });
   const groups = { exact: [], equivalent: [], verify: [], rejected: [] };
   for (const item of candidates) {

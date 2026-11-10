@@ -48,6 +48,19 @@ test('bridge auth, claim, idempotent result, and restart do not leave a job runn
   fs.rmSync(file, { force: true });
 });
 
+test('an expired lease is rejected and the job is queued again', () => {
+  let time = 1000;
+  const bridge = createBridge({ file: null, enabled: true, now: () => time });
+  assert.equal(bridge.enqueue(request).ok, true);
+  const claimed = bridge.claim({ workerId: 'mac', capabilities: ['hirsch', 'winsupply'] });
+  time = 1000 + 180000;
+  const late = bridge.postResult(claimed.job.id, { workerId: 'mac', leaseId: claimed.job.leaseId, result: emptyResult });
+  assert.equal(late.status, 409);
+  assert.equal(late.body.error, 'wrong_lease');
+  assert.equal(bridge.get(claimed.job.id).status, 'queued');
+  assert.notEqual(bridge.get(claimed.job.id).status, 'running');
+});
+
 test('disabled bridge is not advertised and a Mac endpoint is refused', async () => {
   const routes = routesFor(createBridge({ file: null, enabled: false }), false);
   const hidden = res();
@@ -55,4 +68,8 @@ test('disabled bridge is not advertised and a Mac endpoint is refused', async ()
   assert.equal(hidden.statusCode, 404);
   const bad = { ...emptyResult, collector: { ...emptyResult.collector, httpEndpoint: 'https://127.0.0.1/prices' } };
   assert.equal(validateResult(bad).endpointRejected, true);
+  const unsupported = { ...emptyResult, priceRows: [{ supplierId: 'supplyhouse', price: '12.00', priceKind: 'unsupported', guaranteedStock: false }] };
+  assert.equal(validateResult(unsupported).ok, true);
+  const ordered = { ...emptyResult, approvals: { ...emptyResult.approvals, autoPurchase: true } };
+  assert.equal(validateResult(ordered).ok, false);
 });
