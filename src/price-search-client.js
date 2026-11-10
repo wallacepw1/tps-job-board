@@ -129,6 +129,48 @@ function normalizeIdentify(body) {
   return { status: questions.length ? 'needs_answer' : 'complete', questions, ...ai, identifiedSpecs: mapped.identifiedSpecs, candidateHints: mapped.candidateHints, categoryHint: mapped.categoryHint, enrichment: mapped.enrichment };
 }
 
+// Public listed prices found by web search for stores that block the collector.
+// These are never account prices. Only https links on the store's own site are kept.
+const WEB_STORES = {
+  supplyhouse: { name: 'SupplyHouse', domain: 'supplyhouse.com' },
+  masterbuildermercantile: { name: 'Master Builder Mercantile', domain: 'masterbuildermercantile.com' },
+  voomisupply: { name: 'Voomi Supply', domain: 'voomisupply.com' },
+  homedepot: { name: 'Home Depot', domain: 'homedepot.com' },
+  lowes: { name: "Lowe's", domain: 'lowes.com' },
+};
+
+function storeLink(url, id) {
+  try {
+    const parsed = new URL(String(url));
+    const host = parsed.hostname.toLowerCase();
+    const domain = WEB_STORES[id]?.domain;
+    if (!domain || parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
+    return host === domain || host.endsWith(`.${domain}`) ? parsed.href.slice(0, 500) : null;
+  } catch { return null; }
+}
+
+function normalizeWebPrices(body, asked = Object.keys(WEB_STORES)) {
+  if (!body || body.ok === false || body.role !== 'web_prices') return { ok: false, prices: [], notFound: [] };
+  const prices = (Array.isArray(body.prices) ? body.prices : []).slice(0, 12).map(item => {
+    const supplier = asked.includes(item?.supplier) ? item.supplier : null;
+    const price = Number(item?.price);
+    const url = supplier ? storeLink(item?.url, supplier) : null;
+    if (!supplier || !url || !Number.isFinite(price) || price <= 0 || price > 1000000) return null;
+    return {
+      supplier,
+      store: WEB_STORES[supplier].name,
+      item: Number.isInteger(Number(item?.item)) && Number(item.item) >= 1 ? Number(item.item) : 1,
+      product: short(item?.product, 160),
+      price: Math.round(price * 100) / 100,
+      unit: short(item?.unit, 12),
+      url,
+      stockNote: short(item?.stockNote, 100),
+    };
+  }).filter(Boolean).sort((a, b) => a.item - b.item || a.price - b.price);
+  const found = new Set(prices.map(item => item.supplier));
+  return { ok: true, prices, notFound: asked.filter(id => !found.has(id)), note: short(body.note, 200) };
+}
+
 function createPriceClient({ env = process.env, fetch: fetcher = global.fetch } = {}) {
   const cfg = priceSearchConfig(env);
   return {
@@ -152,7 +194,25 @@ function createPriceClient({ env = process.env, fetch: fetcher = global.fetch } 
       try { return normalizeIdentify(text ? JSON.parse(text) : {}); }
       catch { return { status: 'error', error: { code: 'invalid_json', message: 'Identification returned an unreadable result.', retryable: true } }; }
     },
+    async webPrices(requestId, items, suppliers = Object.keys(WEB_STORES)) {
+      if (!cfg.identifyConfigured) return { ok: false, prices: [], notFound: [] };
+      const asked = suppliers.filter(id => WEB_STORES[id]);
+      const list = (Array.isArray(items) ? items : []).slice(0, 2);
+      if (!list.length || !asked.length) return { ok: false, prices: [], notFound: [] };
+      try {
+        const res = await fetcher(cfg.url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: `${requestId}-web`, mode: 'web_prices', items: list, suppliers: asked, zip: '91910', key: cfg.token }),
+          signal: AbortSignal.timeout(IDENTIFY_TIMEOUT_MS),
+          redirect: 'error',
+        });
+        if (!res.ok) return { ok: false, prices: [], notFound: [] };
+        const text = await res.text();
+        return normalizeWebPrices(text ? JSON.parse(text) : {}, asked);
+      } catch { return { ok: false, prices: [], notFound: [] }; }
+    },
   };
 }
 
-module.exports = { CONTRACT_VERSION, questionsFrom, aiExtras, priceSearchConfig, publicStatus, buildRequest, createPriceClient, normalizeIdentify, loopbackHost };
+module.exports = { WEB_STORES, normalizeWebPrices, CONTRACT_VERSION, questionsFrom, aiExtras, priceSearchConfig, publicStatus, buildRequest, createPriceClient, normalizeIdentify, loopbackHost };
