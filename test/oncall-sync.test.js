@@ -64,3 +64,19 @@ test('off mode and missing connections do nothing', async () => {
   assert.equal((await syncOnce({ phone: { ready: false }, syncMode: 'report' })).action, 'skip');
   assert.equal((await syncOnce({ phone: { ready: true }, oncall: async () => ({ connected: false }), syncMode: 'report' })).action, 'skip');
 });
+
+test('a live switch and a failed #office post are kept for the pop-up', async () => {
+  const { getSyncStatus } = require('../src/oncall-sync');
+  const { statusBlocks } = require('../src/phone-status');
+  const { phone } = fakePhone(EDGAR), state = {};
+  const post = async () => { throw new Error('chat.postMessage: not_in_channel'); };
+  await syncOnce({ phone, oncall: cal('Cindy'), post, state, syncMode: 'live' });
+  await syncOnce({ phone, oncall: cal('Cindy'), post, state, syncMode: 'live', now: new Date('2026-11-10T16:05:00Z') });
+  const s = getSyncStatus();
+  assert.equal(s.lastSwitch.person, 'Cindy');
+  assert.equal(s.lastSwitch.from, 'Edgar');
+  assert.match(s.postError, /not_in_channel/);
+  const text = JSON.stringify(statusBlocks({ at: new Date(), phone: { ready: false }, calendar: { connected: false }, errors: [] }));
+  assert.match(text, /last switch Cindy \(from Edgar\)/);
+  assert.match(text, /#office post failed: chat.postMessage: not_in_channel/);
+});
