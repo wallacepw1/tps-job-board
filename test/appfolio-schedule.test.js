@@ -68,7 +68,7 @@ test('own date/time is accepted without a tenant window; empty submit is rejecte
 test('reads record id and Pacific time',()=>{assert.equal(af.recordId([{block_id:'tpsref:RecXY9:1794241637.318289'}]),'RecXY9');assert.deepEqual(af.pacific(1794333600000),{date:'2026-11-10',time:'10:00'});});
 test('DM button finds the card in Please Assign, and scheduling updates the DM',async()=>{
  const log=[];const card={ts:'1794300000.000100',blocks:[{type:'divider',block_id:'tpsref:RecDM1:1794299999.000200'},{type:'actions',elements:[{action_id:'tps_appfolio_pick_time',value:JSON.stringify(call)}]}]};
- const fetch=async(url,opts={})=>{if(url.includes('conversations.history')){log.push(['history',url]);return{json:async()=>({ok:true,messages:[{ts:'1.1',blocks:[]},card]})};}if(url.includes('tps-appfolio-schedule-picker'))return{ok:true,text:async()=>JSON.stringify({status:'options',slots})};const m=url.split('/').pop();log.push([m,JSON.parse(opts.body)]);return{json:async()=>({ok:true,view:{id:'V1'}})};};
+ const fetch=async(url,opts={})=>{if(url.includes('conversations.history')){log.push(['history',url]);return{json:async()=>({ok:true,messages:[{ts:'1.1',blocks:[]},card]})};}if(url.includes('tps-appfolio-schedule-picker'))return{ok:true,text:async()=>JSON.stringify(JSON.parse(opts.body).selection?.custom?{status:'booked',appointment:'Scheduled For: 1/5/99'}:{status:'options',slots})};const m=url.split('/').pop();log.push([m,JSON.parse(opts.body)]);return{json:async()=>({ok:true,view:{id:'V1'}})};};
  await af.route({type:'block_actions',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},trigger_id:'t',channel:{id:'D0PAUL'},message:{ts:'1794300001.000300',blocks:[]},actions:[{action_id:'tps_appfolio_pick_time',value:JSON.stringify(call)}]},{fetch,TPS_BOT_TOKEN:'x',key:'k'});
  const meta=JSON.parse(log.find(x=>x[0]==='views.update')[1].view.private_metadata);
  assert.equal(meta.channel,'C0C2XUL7ZHN');assert.equal(meta.cardTs,card.ts);assert.equal(meta.recordId,'RecDM1');assert.equal(meta.incomingTs,'1794299999.000200');assert.deepEqual(meta.dm,{channel:'D0PAUL',ts:'1794300001.000300'});
@@ -76,7 +76,7 @@ test('DM button finds the card in Please Assign, and scheduling updates the DM',
  const p={type:'view_submission',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},view:{id:'V2',private_metadata:JSON.stringify(meta),state:{values:{own_date:{date:{selected_date:'2099-01-05'}},own_time:{time:{selected_time:'09:00'}}}}}};
  const out=await af.route(p,{fetch,TPS_BOT_TOKEN:'x',submitAssignment:async()=>({status:'done'}),pollMs:0});
  assert.match(out.routed,/Moved to Future Calls/);
- const upd=log.find(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL');assert.ok(upd);assert.ok(log.find(x=>x[0]==='chat.update'&&x[1].channel==='C0C2XUL7ZHN'&&x[1].blocks.length===1));assert.equal(upd[1].channel,'D0PAUL');assert.match(upd[1].text,/2099-01-05 09:00/);
+ const upd=log.find(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL');assert.ok(upd);assert.ok(log.find(x=>x[0]==='chat.update'&&x[1].channel==='C0C2XUL7ZHN'&&x[1].blocks.length===1));assert.equal(upd[1].channel,'D0PAUL');assert.match(upd[1].text,/2099-01-05 9 AM – 1 PM/);
 });
 test('DM button with no matching card leaves routing alone',async()=>{
  const fetch=async url=>({json:async()=>({ok:true,messages:[]})});
@@ -88,4 +88,26 @@ test('scheduling takes the button off the card and keeps the other blocks',async
  assert.equal(await af.removeButton({channel:'C0C2XUL7ZHN',cardTs:'1794300000.000100'},{fetch,TPS_BOT_TOKEN:'x'}),true);
  const u=log.find(x=>x[0]==='chat.update')[1];assert.deepEqual(u.blocks.map(b=>b.block_id),['wo_main','tpsref:RecZ1:1794299999.000200','tps_card_resource_links']);assert.equal(u.text,'132315');
  assert.equal(await af.removeButton({channel:'',cardTs:''},{fetch}),false);
+});
+
+function ownSubmit(status,log){
+ const meta={channel:'C0C2XUL7ZHN',cardTs:'',incomingTs:'1794299999.000200',recordId:'RecOWN1',invoice:'132317',workOrder:'387266-1'};
+ const fetch=async(url,opts={})=>{if(url.includes('tps-appfolio-schedule-picker')){const b=JSON.parse(opts.body);log.push(['picker',b]);return{ok:true,text:async()=>JSON.stringify({status,step:'null',appointment:'null',slots:'null'})};}const m=url.split('/').pop();log.push([m,JSON.parse(opts.body)]);return{json:async()=>({ok:true})};};
+ const p={type:'view_submission',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},view:{id:'V2',private_metadata:JSON.stringify(meta),state:{values:{own_date:{date:{selected_date:'2099-01-05'}},own_time:{time:{selected_option:{value:'10:00'}}}}}}};
+ return af.route(p,{fetch,TPS_BOT_TOKEN:'x',submitAssignment:async()=>({status:'done'}),pollMs:0});
+}
+test('own date + 4-hour window is entered in AppFolio, then the card moves',async()=>{
+ const log=[];const out=await ownSubmit('booked',log);
+ assert.deepEqual(log.find(x=>x[0]==='picker')[1].selection,{custom:true,date:'2099-01-05',time:'10:00'});
+ assert.equal(out.booked,true);assert.match(out.routed,/Moved to Future Calls for 2099-01-05 10:00/);
+ assert.match(log.find(x=>x[0]==='views.update')[1].view.blocks[0].text.text,/10 AM – 2 PM/);
+ assert.ok(log.find(x=>x[0]==='chat.postMessage'&&x[1].thread_ts==='1794299999.000200'));
+});
+test('own window: AppFolio failure leaves the card where it is; tenant-times-only work order schedules the card only',async()=>{
+ let log=[];let out=await ownSubmit('unverified',log);assert.equal(out.routed,'');assert.match(log.find(x=>x[0]==='views.update')[1].view.blocks[0].text.text,/card was not moved/);
+ log=[];out=await ownSubmit('no_custom_form',log);assert.equal(out.booked,false);assert.match(out.routed,/Moved to Future Calls/);
+});
+test('own-time view offers 4-hour windows by start hour',()=>{
+ const v=af.ownTimeView(call,{});const opts=v.blocks.find(b=>b.block_id==='own_time').element.options;
+ assert.equal(opts[0].value,'07:00');assert.ok(opts.some(o=>o.text.text==='9 AM – 1 PM'&&o.value==='09:00'));assert.ok(opts.some(o=>o.text.text==='3 PM – 7 PM'&&o.value==='15:00'));
 });
