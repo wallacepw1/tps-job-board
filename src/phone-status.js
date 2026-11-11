@@ -107,6 +107,12 @@ function statusBlocks(snap) {
     if (snap.phone.numbers.length > 12) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${snap.phone.numbers.length - 12} more numbers.` }] });
   }
   if (snap.errors.length) blocks.push(section('⚠️ ' + [...new Set(snap.errors)].slice(0, 5).join('\n⚠️ ')));
+  const sync = require('./oncall-sync').getSyncStatus();
+  const syncBits = [`Automatic on-call switching: *${sync.mode}*`];
+  if (sync.lastSwitch) syncBits.push(`last switch ${sync.lastSwitch.person} (from ${sync.lastSwitch.from}) ${fmtWhen(new Date(sync.lastSwitch.at))}`);
+  if (sync.last?.action === 'error') syncBits.push(`⚠️ last check failed: ${sync.last.error}`);
+  if (sync.postError) syncBits.push(`⚠️ #office post failed: ${sync.postError}`);
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: syncBits.join(' · ') }] });
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Read only: nothing is changed in Phone.com. Checked ${fmtWhen(snap.at)}.` }] });
   blocks.push({ type: 'actions', elements: [{ type: 'button', action_id: 'tps_phone_refresh', text: { type: 'plain_text', text: '🔄 Refresh' }, value: 'refresh' }] });
   return blocks;

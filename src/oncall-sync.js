@@ -47,11 +47,19 @@ async function syncOnce({ phone = createPhoneCom(), oncall = readOnCall, post, n
   const check = await phone.get('menus', menu.id);
   state.pending = null;
   const ok = Number(check.timeout_handler?.id) === want.routeId;
+  if (ok) visible.lastSwitch = { at: now.toISOString(), person: want.person, from: have ? have.person : String(haveId) };
   await say(post, ok ? `${MENU} Has been changed to: ${want.person} (was ${from}).` : `⚠️ On-call sync tried to switch ${MENU} to ${want.person}, but Phone.com still shows route ${check.timeout_handler?.id}. Please check Phone.com.`);
   return { action: ok ? 'switched' : 'failed', person: want.person, from: haveId };
 }
 
-async function say(post, text) { if (post) await post(text).catch(e => console.error('on-call sync post failed', e.message)); }
+// Shown in the /phone pop-up, so a missed #office post is still visible.
+const visible = { lastSwitch: null, postError: null, last: null };
+async function say(post, text) {
+  if (!post) { visible.postError = 'TPS_BOT_TOKEN is not set, so nothing is posted'; return; }
+  try { await post(text); visible.postError = null; }
+  catch (e) { visible.postError = `${e.message} (${new Date().toISOString()})`; console.error('on-call sync post failed', e.message); }
+}
+function getSyncStatus() { return { mode: mode(), ...visible }; }
 async function note(state, post, key, text) {
   if (state.reported !== key) { state.reported = key; await say(post, text); }
   return { action: 'report', key };
@@ -73,11 +81,11 @@ function startOnCallSync() {
     running = true;
     try { state.last = { at: new Date().toISOString(), ...(await syncOnce({ post, state })) }; }
     catch (e) { state.last = { at: new Date().toISOString(), action: 'error', error: e.message }; console.error('on-call sync failed', e.message); }
-    finally { running = false; }
+    finally { running = false; visible.last = state.last; }
   };
   setTimeout(tick, 30000).unref?.();
   setInterval(tick, EVERY_MS).unref?.();
   return { status: () => ({ mode: mode(), ...state.last }) };
 }
 
-module.exports = { syncOnce, startOnCallSync, slackPoster, mode };
+module.exports = { syncOnce, startOnCallSync, slackPoster, mode, getSyncStatus, _visible: visible };
