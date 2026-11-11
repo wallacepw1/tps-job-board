@@ -21,6 +21,12 @@ function incomingTs(blocks){const m=JSON.stringify(blocks||[]).match(/tpsref:[^:
 function recordId(blocks){const m=JSON.stringify(blocks||[]).match(/tpsref:(Rec[A-Za-z0-9]+):/);return m?m[1]:'';}
 const pacific=ms=>{const p=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(ms)).map(x=>[x.type,x.value]));return{date:p.year+'-'+p.month+'-'+p.day,time:p.hour+':'+p.minute};};
 
+// Own time: any date plus a 4-hour arrival window by start time (9-1, 10-2, ...).
+const hourLabel=h=>(h%12||12)+' '+(h<12?'AM':'PM');
+const WINDOWS=Array.from({length:13},(_,i)=>i+7).map(h=>({text:pt(hourLabel(h)+' – '+hourLabel((h+4)%24)),value:String(h).padStart(2,'0')+':00'}));
+const windowLabel=time=>WINDOWS.find(w=>w.value===time)?.text.text||time;
+const ownBlocks=optional=>[{type:'input',block_id:'own_date',optional,label:pt('Date'),element:{type:'datepicker',action_id:'date'}},
+ {type:'input',block_id:'own_time',optional,label:pt('Arrival window (4 hours, Pacific)'),element:{type:'static_select',action_id:'time',placeholder:pt('Choose a window'),options:WINDOWS}}];
 function infoView(title,text){return{type:'modal',callback_id:CALLBACK+'_info',title:pt(title),close:pt('Close'),blocks:[md(text)]};}
 function loadingView(call){return infoView('AppFolio scheduling',`:hourglass_flowing_sand: Opening AppFolio work order *${call.workOrder}* (invoice ${call.invoice}) to read the tenant's times. This takes about a minute. Keep this window open.`);}
 function pickerView(call,slots,meta,now=Date.now()){
@@ -33,27 +39,25 @@ function pickerView(call,slots,meta,now=Date.now()){
    {type:'input',block_id:'window',optional:true,label:pt('Tenant arrival window'),element:options.length<=10
     ?{type:'radio_buttons',action_id:'slot',options}
     :{type:'static_select',action_id:'slot',placeholder:pt('Choose a date and time'),options}},
-   {type:'section',text:{type:'mrkdwn',text:'*Or set your own date and time* (AppFolio is not changed, just the card):'}},
-   {type:'input',block_id:'own_date',optional:true,label:pt('Date'),element:{type:'datepicker',action_id:'date'}},
-   {type:'input',block_id:'own_time',optional:true,label:pt('Time (Pacific)'),element:{type:'timepicker',action_id:'time'}}]};
+   {type:'section',text:{type:'mrkdwn',text:'*Or set your own date and 4-hour window.* It is entered in AppFolio when the work order allows it; otherwise only the card is scheduled.'}},
+   ...ownBlocks(true)]};
 }
 function ownTimeView(call,meta){return{type:'modal',callback_id:CALLBACK,title:pt('Schedule call'),submit:pt('Schedule'),close:pt('Cancel'),
  private_metadata:JSON.stringify({...meta,invoice:call.invoice,workOrder:call.workOrder}),
- blocks:[md(`AppFolio has no future tenant times for WO *${call.workOrder}*. Set the date and time you arranged with the tenant. A later day moves the card to Future Calls; today keeps it in Please Assign.`),
-  {type:'input',block_id:'own_date',label:pt('Date'),element:{type:'datepicker',action_id:'date'}},
-  {type:'input',block_id:'own_time',label:pt('Time (Pacific)'),element:{type:'timepicker',action_id:'time'}}]};}
-function ownTimeOf(p){const v=p.view?.state?.values||{};const date=v.own_date?.date?.selected_date,time=v.own_time?.time?.selected_time;return /^\d{4}-\d{2}-\d{2}$/.test(date||'')&&/^([01]\d|2[0-3]):[0-5]\d$/.test(time||'')?{date,time}:null;}
+ blocks:[md(`Invoice *${call.invoice}* · AppFolio WO *${call.workOrder}*\nThe tenant gave no times, so pick any date and a 4-hour arrival window. It is entered in AppFolio (the property manager and tenant are notified). A later day moves the card to Future Calls; today keeps it in Please Assign.`),
+  ...ownBlocks(false)]};}
+function ownTimeOf(p){const v=p.view?.state?.values||{};const date=v.own_date?.date?.selected_date,time=v.own_time?.time?.selected_option?.value||v.own_time?.time?.selected_time;return /^\d{4}-\d{2}-\d{2}$/.test(date||'')&&/^([01]\d|2[0-3]):[0-5]\d$/.test(time||'')?{date,time}:null;}
 function selectionOf(p,now=Date.now()){
  try{
   const meta=JSON.parse(p.view.private_metadata||'{}');
   const opt=p.view.state?.values?.window?.slot?.selected_option;
   const sel=JSON.parse(opt?.value||'null');
-  if(validCall(meta)&&!sel){const own=ownTimeOf(p);return own&&own.date>=pacific(now).date?{meta,selection:null,own,label:own.date+' '+own.time}:null;}
+  if(validCall(meta)&&!sel){const own=ownTimeOf(p);return own&&own.date>=pacific(now).date?{meta,selection:null,own,label:own.date+' '+windowLabel(own.time)}:null;}
   if(!validCall(meta)||!sel||!/^timeslot-\d+$/.test(sel.id)||!Number.isSafeInteger(sel.start)||!Number.isSafeInteger(sel.end)||sel.start<=now||sel.end<=sel.start)return null;
   return{meta,selection:{id:sel.id,start:sel.start,end:sel.end},label:opt.text?.text||''};
  }catch{return null;}
 }
-function submissionError(p){if(selectionOf(p))return null;const v=p.view?.state?.values||{};const block=v.window?'window':'own_date';return{[block]:'Pick one of the tenant times, or set a date (today or later) and a time.'};}
+function submissionError(p){if(selectionOf(p))return null;const v=p.view?.state?.values||{};const block=v.window?'window':'own_date';return{[block]:'Pick one of the tenant times, or set a date (today or later) and a 4-hour window.'};}
 
 async function callPicker(body,{key=process.env.TPS_INTERNAL_KEY,fetch:fetcher=global.fetch}={}){
  const r=await fetcher(PICKER,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,...body}),signal:AbortSignal.timeout(110000)});
@@ -90,7 +94,18 @@ async function route(p,options={}){
  // view_submission: Slack was already answered with a "Booking…" view.
  const s=selectionOf(p);if(!s||!isAdmin(p))return null;
  const {meta,selection,label,own}=s;let text,booked=false,out=null;
- if(own){text=`Card scheduled for ${own.date} ${own.time}. AppFolio was not changed.`;}
+ let ownOk=false;
+ if(own){
+  // Own date + 4-hour window: enter it in AppFolio's own schedule form first; the card only moves when that is settled.
+  try{
+   out=await callPicker({mode:'reserve',invoice:meta.invoice,workOrder:meta.workOrder,selection:{custom:true,date:own.date,time:own.time}},options);
+   booked=out.status==='booked';ownOk=booked||out.status==='no_custom_form';
+   text=booked?`:white_check_mark: Entered in AppFolio for WO *${meta.workOrder}*: ${label} (4-hour window).\n${out.appointment||''}`
+    :out.status==='no_custom_form'?`Card scheduled for ${label}. AppFolio only offers the tenant's times on this work order, so AppFolio was not changed.`
+    :out.status==='already_scheduled'?`Work order *${meta.workOrder}* was already scheduled in AppFolio:\n${out.appointment||''}`
+    :`AppFolio did not confirm the schedule${out.step?' ('+out.step+')':''}. The card was not moved. Check the work order in AppFolio before trying again.`;
+  }catch{text='AppFolio could not be reached. The card was not moved. Check the work order in AppFolio before trying again.';}
+ }
  else try{
   out=await callPicker({mode:'reserve',invoice:meta.invoice,workOrder:meta.workOrder,selection},options);
   booked=out.status==='booked';
@@ -99,13 +114,13 @@ async function route(p,options={}){
    :out.status==='window_unavailable'?'That window is no longer offered in AppFolio. Nothing was booked. Press the button again to see current times.'
    :'AppFolio did not confirm the booking. Check the work order in AppFolio before trying again.';
  }catch{text='AppFolio could not be reached. Check the work order in AppFolio before trying again.';}
- const when=booked?pacific(selection.start):own;let routed='';
+ const when=own?(ownOk?own:null):booked?pacific(selection.start):null;let routed='';
  // Scheduled (or AppFolio says it already was): take the button off the card before it moves.
  if(when||out?.status==='already_scheduled')await removeButton(meta,options).catch(e=>console.error('appfolio button removal',e.message));
  if(when)routed=await routeCard(p,meta,when,options);
  await slack('views.update',{view_id:p.view.id,view:infoView('AppFolio scheduling',text+(routed?'\n\n'+routed:''))}).catch(()=>{});
- if((booked||own)&&/^D/.test(meta.dm?.channel||'')&&/^\d{10}\.\d{6}$/.test(meta.dm?.ts||'')){
-  const done=`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} scheduled by <@${p.user.id}>: ${booked?(label||out.appointment||''):own.date+' '+own.time}${routed?'\n'+routed:''}`;
+ if(when&&/^D/.test(meta.dm?.channel||'')&&/^\d{10}\.\d{6}$/.test(meta.dm?.ts||'')){
+  const done=`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} scheduled by <@${p.user.id}>: ${label||out?.appointment||''}${routed?'\n'+routed:''}`;
   await slack('chat.update',{channel:meta.dm.channel,ts:meta.dm.ts,text:done,blocks:[md(done)]}).catch(e=>console.error('appfolio dm update',e.message));
  }
  if(booked&&/^\d{10}\.\d{6}$/.test(meta.incomingTs||'')){
