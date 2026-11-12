@@ -113,6 +113,15 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   const rows=await pages('conversations.history',{channel:COMPLETED},'messages');
   return rows.some(m=>JSON.stringify(m.blocks||[]).includes('tpsref:'+r.recordId+':'+r.incomingTs)||messageText(m).includes(r.recordId)&&messageText(m).includes(r.incomingTs));
  };
+ // Put back the card saved before a dispatch, when the dispatch never moved the call (worker release path).
+ ctx.restoreCard=async(r,c)=>{
+  const saved=await get('TPS_ASSIGN_FEEDBACK_'+r.recordId);
+  if(!saved?.message?.blocks||!c.source||saved.channel!==c.source.channel||saved.ts!==c.source.ts)return false;
+  const current=c.source.message?.blocks||[];
+  if(!current.some(b=>b.block_id==='tps_assignment_status')&&current.some(b=>b.type==='actions'&&b.block_id==='action_buttons_block'))return false;
+  await api('chat.update',{channel:saved.channel,ts:saved.ts,text:saved.message.text||'Call update',blocks:saved.message.blocks.filter(b=>b.block_id!=='tps_assignment_status')});
+  return true;
+ };
  ctx.audit=async(r,c,state)=>{
   const marker='tps_assignment_audit:'+r.requestId;const replies=await readThread({channel:INCOMING,ts:c.incomingTs});
   if(replies.some(m=>(m.blocks||[]).some(b=>b.block_id===marker)))return;

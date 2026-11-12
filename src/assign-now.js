@@ -43,9 +43,12 @@ async function pendingAssignment(r,store){
  if(!id)return{status:'done',pendingRequest:null};
  let saved=await read('TPS_ASSIGN_REQUEST_'+id);
  if(saved?.request?.parentAssignmentRequestId)saved=await read('TPS_ASSIGN_REQUEST_'+saved.request.parentAssignmentRequestId);
- if(!saved?.request||saved.request.actor!==r.actor||saved.request.recordId!==r.recordId)return no('A pending action belongs to another admin. Ask that admin to verify it.');
+ if(!saved?.request||saved.request.recordId!==r.recordId)return no('The pending action could not be read. Nothing was resumed.');
+ const nowPhase=state.pendingAssignNow||id.startsWith('now_');
+ // Any admin may check and resume a plain pending action (it is the same request, so it can never run twice).
+ if(nowPhase&&saved.request.actor!==r.actor)return no('A pending action belongs to another admin. Ask that admin to verify it.');
  const original=saved.request;
- if(state.pendingAssignNow||id.startsWith('now_')){
+ if(nowPhase){
   const phase=await read('TPS_ASSIGN_NOW_'+original.requestId);
   if(original.operation!=='assign'||saved.fingerprint!==fingerprint(original)||phase?.fingerprint!==saved.fingerprint||phase.request?.parentAssignmentRequestId!==original.requestId||phase.request?.requestId!==phaseIdFor(original.requestId)||phase.request?.actor!==r.actor||phase.request?.recordId!==r.recordId||phase.request?.incomingTs!==original.incomingTs)return no('The original assignment could not be verified. Nothing was resumed.');
  }
