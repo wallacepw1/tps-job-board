@@ -50,7 +50,7 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   if(['plumber','unassigned'].includes(stage)){c.source=await sourceFromRecord(record,lead,r);const sourceState=parseReplies([{text:messageText(c.source.message),ts:c.source.ts}]);if(sourceState.scheduledFor)c.appointmentDate=sourceState.scheduledFor.date;if(sourceState.needsDate||c.source.channel===ASSIGN)c.appointmentDate=null;}
   return c;
  }
- const ctx={authenticated:!!key,serialized,actor,now:()=>now().getTime(),requests:{get:id=>get('TPS_ASSIGN_REQUEST_'+id),set:(id,v)=>set('TPS_ASSIGN_REQUEST_'+id,v)},state:{get:id=>get('TPS_ASSIGN_STATE_'+id),set:(id,v)=>set('TPS_ASSIGN_STATE_'+id,v)},loadCall};
+ const ctx={authenticated:!!key,serialized,actor,now:()=>now().getTime(),sleep:ms=>new Promise(res=>setTimeout(res,ms)),requests:{get:id=>get('TPS_ASSIGN_REQUEST_'+id),set:(id,v)=>set('TPS_ASSIGN_REQUEST_'+id,v)},state:{get:id=>get('TPS_ASSIGN_STATE_'+id),set:(id,v)=>set('TPS_ASSIGN_STATE_'+id,v)},loadCall};
  const files={read:async f=>{const u=new URL(f.url_private_download||f.url_private);if(u.protocol!=='https:'||u.hostname!=='files.slack.com')throw Error('Unexpected Slack file URL.');const res=await fetcher(u.href,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(30000)});if(!res.ok)throw Error('Helper file could not be downloaded.');return Buffer.from(await res.arrayBuffer());}};ctx.files=files;
  const adapter={
   get,set,digest:hash,readThread,

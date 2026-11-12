@@ -1,7 +1,7 @@
 'use strict';
 const {validateAssignment}=require('./assignment-policy');
 const fingerprint=r=>JSON.stringify([r.actor,r.operation,r.recordId,r.incomingTs,r.expectedLead,r.expectedHelper,r.target,...(r.operation==='reschedule'?[r.schedule?.noDate===true?'none':[r.schedule?.date,r.schedule?.time]]:[])]);
-const RELEASE_AFTER_MS=2*60e3;
+const RELEASE_AFTER_MS=2*60e3,GUARD_MS=65e3;
 // True only when the call still matches the state the request was made from.
 function unchanged(r,c){
  if(c.stage==='completed')return false;
@@ -69,7 +69,11 @@ async function handleAssignment(r,ctx){
   }
   if(['assign','reassign','reschedule','lead_complete'].includes(r.operation)){
    if(ctx.prepareDispatch)await ctx.prepareDispatch(r,c);
-   state.dispatchStarted=r.requestId;await ctx.state.set(r.recordId,state);
+   // Call Route ignores a second assignment press on the same call within 60 s (its assign guard), which
+   // left 132333 locked on 11-10. Wait that window out instead of sending a change Call Route will drop.
+   const wait=state.lastDispatchAt?state.lastDispatchAt+GUARD_MS-now():0;
+   if(wait>0&&ctx.sleep)await ctx.sleep(Math.min(wait,GUARD_MS));
+   state.dispatchStarted=r.requestId;state.lastDispatchAt=now();await ctx.state.set(r.recordId,state);
    let dispatchError;
    try{await ctx.dispatch(r,c,state);}catch(e){dispatchError=e;}
    let verified=false;try{verified=await ctx.verifyDispatch(r,c,state);}catch{}
