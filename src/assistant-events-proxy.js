@@ -3,6 +3,7 @@ const {verifySlackRequest}=require('./call-actions-proxy');
 const {assistantMeldRequest}=require('./assistant-meld-relay');
 const {handlePhone}=require('./phone-admin');
 const {handlePriceSearch,publicStatus}=require('./price-search');
+const appfolioSchedule=require('./appfolio-schedule');
 const TARGET='https://webhook.latenode.com/27333/prod/media-bot-slack-events';
 function parseAssistantBody(raw){
  try{return JSON.parse(raw);}catch{
@@ -31,6 +32,17 @@ function registerAssistantEventsProxy(receiver,options={}){
    if(!verifySlackRequest(raw,req.headers,options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET))return res.status(401).send('Request could not be verified.');
    const body=parseAssistantBody(raw);
    if(body.type==='url_verification')return res.status(200).send(body.challenge);
+   // "Schedule this call" alert in the TPS Assistant messages: same AppFolio scheduling as the card button,
+   // with this app's token for the pop-up and the alert. Never relayed to Latenode.
+   if(appfolioSchedule.intercepts(body)){
+    if(body.type==='view_submission'){
+     const error=appfolioSchedule.submissionError(body);
+     if(error)return res.status(200).json({response_action:'errors',errors:error});
+     res.status(200).json({response_action:'update',view:appfolioSchedule.infoView('AppFolio scheduling',':hourglass_flowing_sand: Booking in AppFolio… This takes about a minute. Please do not submit again.')});
+    }else res.status(200).send('');
+    appfolioSchedule.route(body,{...options,viewToken:options.assistantToken||process.env.TPS_ASSISTANT_BOT_TOKEN}).catch(e=>console.error('appfolio schedule',e.message));
+    return;
+   }
    // Phone settings (/admin phone) are answered here, never relayed to Latenode.
    const phone=handlePhone(body,{fetch:options.fetch,load:options.loadPhone});
    if(phone){if(phone.json)res.status(phone.status).json(phone.json);else res.status(phone.status).send(phone.body);return;}

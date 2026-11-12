@@ -73,11 +73,13 @@ async function callPicker(body,{key=process.env.TPS_INTERNAL_KEY,fetch:fetcher=g
 async function route(p,options={}){
  const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN,fetcher=options.fetch||global.fetch;
  const slack=(m,b)=>slackApi(m,b,token,fetcher);
+ // Pressed in the TPS Assistant messages: that app owns the pop-up and the alert, TPS Bot still owns the cards.
+ const ui=(m,b)=>slackApi(m,b,options.viewToken||token,fetcher);
  if(p.type==='block_actions'){
   let call=null;try{call=JSON.parse(p.actions[0].value||'null');}catch{}
-  if(!isAdmin(p))return slack('views.open',{trigger_id:p.trigger_id,view:infoView('AppFolio scheduling','Only admins can book AppFolio times.')});
-  if(!validCall(call))return slack('views.open',{trigger_id:p.trigger_id,view:infoView('AppFolio scheduling','This card has no AppFolio work order number.')});
-  const opened=await slack('views.open',{trigger_id:p.trigger_id,view:loadingView(call)});
+  if(!isAdmin(p))return ui('views.open',{trigger_id:p.trigger_id,view:infoView('AppFolio scheduling','Only admins can book AppFolio times.')});
+  if(!validCall(call))return ui('views.open',{trigger_id:p.trigger_id,view:infoView('AppFolio scheduling','This card has no AppFolio work order number.')});
+  const opened=await ui('views.open',{trigger_id:p.trigger_id,view:loadingView(call)});
   let meta={channel:p.channel?.id||p.container?.channel_id||'',cardTs:p.message?.ts||p.container?.message_ts||'',incomingTs:incomingTs(p.message?.blocks),recordId:recordId(p.message?.blocks)};
   // Pressed in the "please schedule" DM: work on the call's card in Please Assign instead.
   if(meta.channel!==ASSIGN&&/^D/.test(meta.channel)){const dm={channel:meta.channel,ts:meta.cardTs};meta={...(await findAssignCard(call,options).catch(e=>{console.error('appfolio card lookup',e.message);return null;})||{channel:'',cardTs:'',incomingTs:'',recordId:''}),dm};}
@@ -89,7 +91,7 @@ async function route(p,options={}){
     :out.status==='already_scheduled'?infoView('AppFolio scheduling',`Work order *${call.workOrder}* is already scheduled in AppFolio:\n${out.appointment||''}`)
     :infoView('AppFolio scheduling',`AppFolio could not be read for work order *${call.workOrder}* (${out.step||out.status}). Try again in a minute, or check the work order in AppFolio.`);
   }catch(e){view=infoView('AppFolio scheduling',e.message+' Nothing was booked.');}
-  return slack('views.update',{view_id:opened.view.id,view});
+  return ui('views.update',{view_id:opened.view.id,view});
  }
  // view_submission: Slack was already answered with a "Booking…" view.
  const s=selectionOf(p);if(!s||!isAdmin(p))return null;
@@ -118,10 +120,19 @@ async function route(p,options={}){
  // Scheduled (or AppFolio says it already was): take the button off the card before it moves.
  if(when||out?.status==='already_scheduled')await removeButton(meta,options).catch(e=>console.error('appfolio button removal',e.message));
  if(when)routed=await routeCard(p,meta,when,options);
- await slack('views.update',{view_id:p.view.id,view:infoView('AppFolio scheduling',text+(routed?'\n\n'+routed:''))}).catch(()=>{});
+ await ui('views.update',{view_id:p.view.id,view:infoView('AppFolio scheduling',text+(routed?'\n\n'+routed:''))}).catch(()=>{});
  if(when&&/^D/.test(meta.dm?.channel||'')&&/^\d{10}\.\d{6}$/.test(meta.dm?.ts||'')){
   const done=`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} scheduled by <@${p.user.id}>: ${label||out?.appointment||''}${routed?'\n'+routed:''}`;
-  await slack('chat.update',{channel:meta.dm.channel,ts:meta.dm.ts,text:done,blocks:[md(done)]}).catch(e=>console.error('appfolio dm update',e.message));
+  // Paul 2026-11-12: the alert and its confirmation belong in the TPS Assistant messages, not the TPS Bot DM.
+  // Alert pressed in the Assistant messages: it becomes the confirmation in place. Older alerts in the TPS Bot DM:
+  // the confirmation is posted in the Assistant messages and the alert removed (kept and updated if that fails).
+  const assistant=options.assistantToken??process.env.TPS_ASSISTANT_BOT_TOKEN;
+  const said={channel:meta.dm.channel,ts:meta.dm.ts,text:done,blocks:[md(done)]};
+  if(options.viewToken)await ui('chat.update',said).catch(e=>console.error('appfolio dm update',e.message));
+  else{
+   const moved=assistant?await slackApi('chat.postMessage',{channel:p.user.id,text:done,blocks:[md(done)],unfurl_links:false},assistant,fetcher).then(()=>true).catch(e=>{console.error('appfolio assistant confirmation',e.message);return false;}):false;
+   await slack(moved?'chat.delete':'chat.update',moved?{channel:meta.dm.channel,ts:meta.dm.ts}:said).catch(e=>console.error('appfolio dm update',e.message));
+  }
  }
  if(booked&&/^\d{10}\.\d{6}$/.test(meta.incomingTs||'')){
   await slack('chat.postMessage',{channel:INCOMING,thread_ts:meta.incomingTs,text:`:calendar: AppFolio appointment booked by <@${p.user.id}> for WO ${meta.workOrder}: ${label||out.appointment||''}`,unfurl_links:false}).catch(e=>console.error('appfolio schedule log',e.message));
