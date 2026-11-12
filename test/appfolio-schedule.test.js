@@ -77,6 +77,10 @@ test('DM button finds the card in Please Assign, and scheduling updates the DM',
  const out=await af.route(p,{fetch,TPS_BOT_TOKEN:'x',submitAssignment:async()=>({status:'done'}),pollMs:0});
  assert.match(out.routed,/Moved to Future Calls/);
  const upd=log.find(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL');assert.ok(upd);assert.ok(log.find(x=>x[0]==='chat.update'&&x[1].channel==='C0C2XUL7ZHN'&&x[1].blocks.length===1));assert.equal(upd[1].channel,'D0PAUL');assert.match(upd[1].text,/2099-01-05 9 AM – 1 PM/);
+ // With the Assistant token the confirmation goes to the TPS Assistant messages and the TPS Bot prompt is removed.
+ log.length=0;await af.route(p,{fetch,TPS_BOT_TOKEN:'x',assistantToken:'xoxb-assistant',submitAssignment:async()=>({status:'done'}),pollMs:0});
+ const conf=log.find(x=>x[0]==='chat.postMessage'&&x[1].channel==='U0876C3TEGL');assert.match(conf[1].text,/scheduled by <@U0876C3TEGL>: 2099-01-05 9 AM – 1 PM/);
+ assert.deepEqual(log.find(x=>x[0]==='chat.delete')[1],{channel:'D0PAUL',ts:'1794300001.000300'});assert.equal(log.some(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL'),false);
 });
 test('DM button with no matching card leaves routing alone',async()=>{
  const fetch=async url=>({json:async()=>({ok:true,messages:[]})});

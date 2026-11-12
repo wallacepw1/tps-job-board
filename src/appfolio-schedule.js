@@ -121,7 +121,11 @@ async function route(p,options={}){
  await slack('views.update',{view_id:p.view.id,view:infoView('AppFolio scheduling',text+(routed?'\n\n'+routed:''))}).catch(()=>{});
  if(when&&/^D/.test(meta.dm?.channel||'')&&/^\d{10}\.\d{6}$/.test(meta.dm?.ts||'')){
   const done=`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} scheduled by <@${p.user.id}>: ${label||out?.appointment||''}${routed?'\n'+routed:''}`;
-  await slack('chat.update',{channel:meta.dm.channel,ts:meta.dm.ts,text:done,blocks:[md(done)]}).catch(e=>console.error('appfolio dm update',e.message));
+  // Paul 2026-11-12: the confirmation belongs in the TPS Assistant messages, not the TPS Bot DM.
+  // Posted there with the Assistant token; the TPS Bot prompt is then removed. Without that token it stays as before.
+  const assistant=options.assistantToken??process.env.TPS_ASSISTANT_BOT_TOKEN;
+  const moved=assistant?await slackApi('chat.postMessage',{channel:p.user.id,text:done,blocks:[md(done)],unfurl_links:false},assistant,fetcher).then(()=>true).catch(e=>{console.error('appfolio assistant confirmation',e.message);return false;}):false;
+  await slack(moved?'chat.delete':'chat.update',moved?{channel:meta.dm.channel,ts:meta.dm.ts}:{channel:meta.dm.channel,ts:meta.dm.ts,text:done,blocks:[md(done)]}).catch(e=>console.error('appfolio dm update',e.message));
  }
  if(booked&&/^\d{10}\.\d{6}$/.test(meta.incomingTs||'')){
   await slack('chat.postMessage',{channel:INCOMING,thread_ts:meta.incomingTs,text:`:calendar: AppFolio appointment booked by <@${p.user.id}> for WO ${meta.workOrder}: ${label||out.appointment||''}`,unfurl_links:false}).catch(e=>console.error('appfolio schedule log',e.message));
