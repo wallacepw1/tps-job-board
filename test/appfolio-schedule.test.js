@@ -81,6 +81,9 @@ test('DM button finds the card in Please Assign, and scheduling updates the DM',
  log.length=0;await af.route(p,{fetch,TPS_BOT_TOKEN:'x',assistantToken:'xoxb-assistant',submitAssignment:async()=>({status:'done'}),pollMs:0});
  const conf=log.find(x=>x[0]==='chat.postMessage'&&x[1].channel==='U0876C3TEGL');assert.match(conf[1].text,/scheduled by <@U0876C3TEGL>: 2099-01-05 9 AM – 1 PM/);
  assert.deepEqual(log.find(x=>x[0]==='chat.delete')[1],{channel:'D0PAUL',ts:'1794300001.000300'});assert.equal(log.some(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL'),false);
+ // Alert pressed in the TPS Assistant messages: it turns into the confirmation in place, nothing is posted or deleted.
+ log.length=0;await af.route(p,{fetch,TPS_BOT_TOKEN:'x',viewToken:'xoxb-assistant',assistantToken:'xoxb-assistant',submitAssignment:async()=>({status:'done'}),pollMs:0});
+ assert.match(log.find(x=>x[0]==='chat.update'&&x[1].channel==='D0PAUL')[1].text,/scheduled by <@U0876C3TEGL>/);assert.equal(log.some(x=>x[0]==='chat.delete'||x[0]==='chat.postMessage'&&x[1].channel==='U0876C3TEGL'),false);
 });
 test('DM button with no matching card leaves routing alone',async()=>{
  const fetch=async url=>({json:async()=>({ok:true,messages:[]})});

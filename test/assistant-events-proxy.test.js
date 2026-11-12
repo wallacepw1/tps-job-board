@@ -38,3 +38,16 @@ test('signed admin Meld click is acknowledged and relayed directly with the inte
  await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);assert.equal(res.code,200);assert.equal(sent[0].url,'https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831');assert.equal(JSON.parse(JSON.parse(sent[0].p.body).payload).key,'fixture-internal');
 });
 
+test('Schedule this call pressed in the Assistant messages opens the pop-up with the Assistant token and is not relayed',async()=>{
+ const routes={},secret='fixture-signing',sent=[];
+ const fetch=async(url,o)=>{sent.push({url,auth:o.headers?.Authorization,body:o.body});if(url.includes('tps-appfolio-schedule-picker'))return{ok:true,text:async()=>JSON.stringify({status:'options',slots:'[]'})};return{json:async()=>({ok:true,view:{id:'V1'},messages:[]})};};
+ registerAssistantEventsProxy({router:{post:(p,h)=>routes[p]=h,get:()=>{}}},{secret,key:'k',assistantToken:'xoxb-assistant',TPS_BOT_TOKEN:'xoxb-bot',fetch});
+ const payload={type:'block_actions',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},trigger_id:'t',channel:{id:'D0ASSIST'},message:{ts:'1794300001.000300',blocks:[]},actions:[{action_id:'tps_appfolio_pick_time',value:JSON.stringify({invoice:'132364',workOrder:'387489-1'})}]};
+ const raw=new URLSearchParams({payload:JSON.stringify(payload)}).toString(),ts=String(Math.floor(Date.now()/1000));
+ const headers={'x-slack-request-timestamp':ts,'x-slack-signature':'v0='+createHmac('sha256',secret).update('v0:'+ts+':'+raw).digest('hex')};
+ const res={status(n){this.code=n;return this;},send(){return this;},json(){return this;},type(){return this;}};
+ await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);assert.equal(res.code,200);
+ for(let i=0;i<50&&!sent.some(x=>x.url.endsWith('views.update'));i++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(sent.find(x=>x.url.endsWith('views.open')).auth,'Bearer xoxb-assistant');assert.equal(sent.find(x=>x.url.endsWith('views.update')).auth,'Bearer xoxb-assistant');
+ assert.equal(sent.find(x=>x.url.includes('conversations.history')).auth,'Bearer xoxb-bot');assert.equal(sent.some(x=>x.url.includes('media-bot-slack-events')),false);
+});
