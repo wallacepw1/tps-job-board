@@ -18,7 +18,7 @@ function decodeDraft(value,key,actor,now=Date.now()){
  const signature=createHmac('sha256',key).update(parts[0]).digest();
  if(!timingSafeEqual(signature,Buffer.from(parts[1],'hex')))throw Error('This form was changed.');
  const draft=JSON.parse(Buffer.from(parts[0],'base64url').toString());
- if(draft.actor!==actor||!ADMINS.includes(actor)||!Number.isFinite(draft.expires)||draft.expires<now)throw Error('This form expired or belongs to another user. Reopen the call.');
+ if((draft.resume?draft.resumedBy:draft.actor)!==actor||!ADMINS.includes(actor)||!Number.isFinite(draft.expires)||draft.expires<now)throw Error('This form expired or belongs to another user. Reopen the call.');
  return draft;
 }
 function assignmentModal(job,operation,actor,key,now=Date.now()){
@@ -37,8 +37,8 @@ function assignmentModal(job,operation,actor,key,now=Date.now()){
  ...(operation==='helper_remove'?[{type:'section',text:{type:'mrkdwn',text:'Remove the helper after their photos and comments are safely recorded.'}}]:[{type:'input',block_id:'assignment_target',label:{type:'plain_text',text:operation==='helper_add'?'Helper':'Plumber'},element:{type:'static_select',action_id:'target',options,placeholder:{type:'plain_text',text:'Choose a plumber'}}}])]};
 }
 function assignmentResumeModal(request,actor,key,now=Date.now()){
- if(!ADMINS.includes(actor)||request.actor!==actor)throw Error('This pending action belongs to another admin.');
- return{type:'modal',callback_id:'job_assignment',private_metadata:encodeDraft({...request,resume:true},key,now),title:{type:'plain_text',text:'Pending assignment'},submit:{type:'plain_text',text:'Check and resume'},close:{type:'plain_text',text:'Cancel'},blocks:[{type:'section',text:{type:'mrkdwn',text:'An earlier '+(LABELS[request.operation]||'call action')+' still needs verification. Check its existing result and resume only unfinished steps. The original request and plumber selection will be retained.'}}]};
+ if(!ADMINS.includes(actor))throw Error('Assignment tools are limited to TPS admins.');
+ return{type:'modal',callback_id:'job_assignment',private_metadata:encodeDraft({...request,resume:true,resumedBy:actor},key,now),title:{type:'plain_text',text:'Pending assignment'},submit:{type:'plain_text',text:'Check and resume'},close:{type:'plain_text',text:'Cancel'},blocks:[{type:'section',text:{type:'mrkdwn',text:'An earlier '+(LABELS[request.operation]||'call action')+(request.actor&&request.actor!==actor?' by <@'+request.actor+'>':'')+' still needs verification. *Check and resume* finishes it if it went through. If it never reached the call (nothing moved after 2 minutes), it unlocks the call and puts the card\'s buttons back so you can try again.'}}]};
 }
 async function submitAssignment(request,{fetch:fetcher=global.fetch,endpoint=process.env.TPS_CALL_ACTIONS_URL,key=process.env.TPS_INTERNAL_KEY,mode='submit'}={}){
  if(!key||!endpoint)throw Error('Assignment tools are not connected yet. Nothing was changed.');

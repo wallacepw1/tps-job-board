@@ -63,7 +63,7 @@ async function handleEnvelope(e,options){
   const result=await assignWithNow(request,ctx,options);
   if(e.event?.view?.id)shell=e.event.view.id;
   if(shell)await options.slack('views.update',{view_id:shell,view:messageView(result.status==='done'?'✅ Saved. The call history has been updated.':result.error||'⏳ Still queued. Refresh the Job Board shortly.')});
-  if(result.status!=='done'){
+  if(result.status!=='done'&&!result.released){ // a released call already has its buttons back
    let feedback=e.event;
    if(request?.recordId){let saved=await options.store.getGlobalVariable('TPS_ASSIGN_FEEDBACK_'+request.recordId);try{saved=typeof saved==='string'?JSON.parse(saved):saved;}catch{saved=null;}if(saved)feedback={channel:{id:saved.channel},container:{message_ts:saved.ts},message:saved.message};}
    if(feedback)await callFeedback(feedback,options,'⚠️ '+(result.error||'The action is not yet verified.')+' Check this call in the Job Board before retrying.').catch(()=>{});

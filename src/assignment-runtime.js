@@ -50,7 +50,7 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   if(['plumber','unassigned'].includes(stage)){c.source=await sourceFromRecord(record,lead,r);const sourceState=parseReplies([{text:messageText(c.source.message),ts:c.source.ts}]);if(sourceState.scheduledFor)c.appointmentDate=sourceState.scheduledFor.date;if(sourceState.needsDate||c.source.channel===ASSIGN)c.appointmentDate=null;}
   return c;
  }
- const ctx={authenticated:!!key,serialized,actor,now:()=>now().getTime(),requests:{get:id=>get('TPS_ASSIGN_REQUEST_'+id),set:(id,v)=>set('TPS_ASSIGN_REQUEST_'+id,v)},state:{get:id=>get('TPS_ASSIGN_STATE_'+id),set:(id,v)=>set('TPS_ASSIGN_STATE_'+id,v)},loadCall};
+ const ctx={authenticated:!!key,serialized,actor,now:()=>now().getTime(),sleep:ms=>new Promise(res=>setTimeout(res,ms)),requests:{get:id=>get('TPS_ASSIGN_REQUEST_'+id),set:(id,v)=>set('TPS_ASSIGN_REQUEST_'+id,v)},state:{get:id=>get('TPS_ASSIGN_STATE_'+id),set:(id,v)=>set('TPS_ASSIGN_STATE_'+id,v)},loadCall};
  const files={read:async f=>{const u=new URL(f.url_private_download||f.url_private);if(u.protocol!=='https:'||u.hostname!=='files.slack.com')throw Error('Unexpected Slack file URL.');const res=await fetcher(u.href,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(30000)});if(!res.ok)throw Error('Helper file could not be downloaded.');return Buffer.from(await res.arrayBuffer());}};ctx.files=files;
  const adapter={
   get,set,digest:hash,readThread,
@@ -112,6 +112,15 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   if(latest.stage!=='completed')return false;
   const rows=await pages('conversations.history',{channel:COMPLETED},'messages');
   return rows.some(m=>JSON.stringify(m.blocks||[]).includes('tpsref:'+r.recordId+':'+r.incomingTs)||messageText(m).includes(r.recordId)&&messageText(m).includes(r.incomingTs));
+ };
+ // Put back the card saved before a dispatch, when the dispatch never moved the call (worker release path).
+ ctx.restoreCard=async(r,c)=>{
+  const saved=await get('TPS_ASSIGN_FEEDBACK_'+r.recordId);
+  if(!saved?.message?.blocks||!c.source||saved.channel!==c.source.channel||saved.ts!==c.source.ts)return false;
+  const current=c.source.message?.blocks||[];
+  if(!current.some(b=>b.block_id==='tps_assignment_status')&&current.some(b=>b.type==='actions'&&b.block_id==='action_buttons_block'))return false;
+  await api('chat.update',{channel:saved.channel,ts:saved.ts,text:saved.message.text||'Call update',blocks:saved.message.blocks.filter(b=>b.block_id!=='tps_assignment_status')});
+  return true;
  };
  ctx.audit=async(r,c,state)=>{
   const marker='tps_assignment_audit:'+r.requestId;const replies=await readThread({channel:INCOMING,ts:c.incomingTs});
