@@ -151,3 +151,14 @@ test('card stored by Slack with the calendar as its own emoji element still gets
  assert.equal(af.withScheduled('a\n\n:date: Tenant availability:\nx\n\nVendor / access instructions:','📅 Scheduled: Y'),'a\n\n📅 Scheduled: Y\n\nVendor / access instructions:');
  const linked=[{type:'rich_text',block_id:'wo_main',elements:[{type:'rich_text_section',elements:[{type:'text',text:'a'},{type:'link',url:'https://x.y'}]}]}];assert.equal(af.scheduleOnBlocks(linked,'z'),false);assert.equal(linked[0].elements[0].elements.length,2);
 });
+
+test('tenant times that have passed come off the card list',()=>{
+ const now=Date.parse('2026-11-13T20:00:00Z'); // Fri 11/13 12:00 PM Pacific
+ const body='132366\n387458-1\n\n📅 Tenant availability:\nThursday 11/12/2026: 1:00pm-5:00pm PST\nFriday 11/13/2026: 8:00am-12:00pm PST,\n1:00pm-5:00pm PST\nMonday 11/16/2026: 10:00am-2:00pm PST\n\nVendor / access instructions:\nkey';
+ assert.equal(af.dropPast(body,now),'132366\n387458-1\n\n📅 Tenant availability:\nFriday 11/13/2026: 1:00pm-5:00pm PST\nMonday 11/16/2026: 10:00am-2:00pm PST\n\nVendor / access instructions:\nkey');
+ assert.equal(af.dropPast('a\n\n:date: Tenant availability:\nThursday 11/12/2026: 1:00pm-5:00pm PST\n\nVendor / access instructions:',now),'a\n\n:date: Tenant availability: the times the tenant offered have passed.\n\nVendor / access instructions:');
+ const future='a\n\n📅 Tenant availability:\nMonday 11/16/2026: 10:00am-2:00pm PST,\n1:00pm-5:00pm PST';assert.equal(af.dropPast(future,now),future);
+ const odd='a\n\n📅 Tenant availability:\nThursday 11/12/2026: call first\n\nVendor / access instructions:';assert.equal(af.dropPast(odd,now),odd);
+ assert.equal(af.dropPast('a\n\n📅 Scheduled: X',now),'a\n\n📅 Scheduled: X');
+ assert.equal(af.withScheduled(af.dropPast('a\n\n📅 Tenant availability:\nThursday 11/12/2026: 1:00pm-5:00pm PST\n\nVendor / access instructions:',now),'📅 Scheduled: Y'),'a\n\n📅 Scheduled: Y\n\nVendor / access instructions:');
+});
