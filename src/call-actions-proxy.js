@@ -73,7 +73,7 @@ function registerCallActionsProxy(receiver,options={}){
     if(payload.type==='view_submission'){
      const error=appfolioSchedule.submissionError(payload);
      if(error){res.status(200).json({response_action:'errors',errors:error});return;}
-     res.status(200).json({response_action:'update',view:appfolioSchedule.infoView('AppFolio scheduling',':hourglass_flowing_sand: Booking in AppFolio… This takes about a minute. Please do not submit again.')});
+     res.status(200).json({response_action:'update',view:appfolioSchedule.infoView('AppFolio scheduling',appfolioSchedule.pendingText(payload))});
     }else res.status(200).send('');
     appfolioSchedule.route(payload,options).catch(e=>console.error('appfolio schedule',e.message));
     return;
