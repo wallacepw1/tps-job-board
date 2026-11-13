@@ -153,10 +153,21 @@ async function findAssignCard(call,options={}){
  return m?{channel:ASSIGN,cardTs:m.ts,incomingTs:incomingTs(m.blocks),recordId:recordId(m.blocks)}:null;
 }
 // Paul 2026-11-13: once scheduled, the card shows the time that was set instead of every time the tenant offered.
+const MARK='(?:📅|:date:|:calendar:)';
 function withScheduled(text,line){
- const t=String(text||'');
- if(/📅 (?:Tenant availability|Scheduled):/u.test(t))return t.replace(/📅 (?:Tenant availability|Scheduled):[\s\S]*?(?=\n\nVendor \/ access instructions:|\n\nProperty notes:|\n\nWORK ORDER|$)/u,line);
+ const t=String(text||''),has=new RegExp(MARK+' (?:Tenant availability|Scheduled):','u');
+ if(has.test(t))return t.replace(new RegExp(MARK+' (?:Tenant availability|Scheduled):[\\s\\S]*?(?=\\n\\nVendor \\/ access instructions:|\\n\\nProperty notes:|\\n\\nWORK ORDER|$)','u'),line);
  return /\n\nVendor \/ access instructions:/.test(t)?t.replace(/\n\nVendor \/ access instructions:/,'\n\n'+line+'\n\nVendor / access instructions:'):t+'\n\n'+line;
+}
+// Slack stores the card's 📅 as its own emoji element between two text elements, so the card body is put back
+// together, changed, and written as one text element. Cards holding anything else (links, mentions) are left alone.
+function scheduleOnBlocks(blocks,line){
+ const section=blocks.find(b=>b.block_id==='wo_main')?.elements?.[0];
+ if(!section||!Array.isArray(section.elements)||!section.elements.length)return false;
+ if(!section.elements.every(e=>e.type==='text'&&typeof e.text==='string'&&!e.style||e.type==='emoji'&&(e.unicode||e.name)))return false;
+ const whole=section.elements.map(e=>e.type==='text'?e.text:e.unicode?String.fromCodePoint(...e.unicode.split('-').map(x=>parseInt(x,16))):':'+e.name+':').join('');
+ section.elements=[{type:'text',text:withScheduled(whole,line)}];
+ return true;
 }
 // Removes the Pick AppFolio time button from a TPS Bot card and, when a time was set, writes it on the card.
 // Everything else on the card stays as it is.
@@ -171,9 +182,8 @@ async function removeButton(meta,options={},scheduled=''){
  let text=m.text||'';
  if(scheduled){
   const line='📅 Scheduled: '+scheduled;
-  const first=blocks.find(b=>b.block_id==='wo_main')?.elements?.[0]?.elements?.find(e=>e.type==='text'&&typeof e.text==='string');
-  if(first)first.text=withScheduled(first.text,line);
-  if(/📅 (?:Tenant availability|Scheduled):/u.test(text))text=withScheduled(text,line);
+  scheduleOnBlocks(blocks,line);
+  if(new RegExp(MARK+' (?:Tenant availability|Scheduled):','u').test(text))text=withScheduled(text,line);
  }
  if(JSON.stringify(blocks)===JSON.stringify(m.blocks)&&text===(m.text||''))return false;
  await slackApi('chat.update',{channel:meta.channel,ts:meta.cardTs,text,blocks},token,fetcher);
@@ -209,4 +219,4 @@ async function routeCard(p,meta,when,options={}){
  }catch(e){return 'The card could not be moved to Future Calls ('+e.message+'). Use Reschedule on it.';}
 }
 
-module.exports={findAssignCard,removeButton,closeAlerts,withScheduled,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
+module.exports={findAssignCard,removeButton,closeAlerts,withScheduled,scheduleOnBlocks,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
