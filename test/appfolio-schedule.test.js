@@ -144,3 +144,10 @@ test('card button: time is written on the card and the Assistant alert for that 
  const closed=log.filter(x=>x[0]==='chat.update'&&x[1].channel==='DASSIST');
  assert.equal(closed.length,1);assert.equal(closed[0][1].ts,'1794570742.217879');assert.equal(closed[0][2],'Bearer xoxb-assistant');assert.match(closed[0][1].text,/132366 · WO 387458-1 scheduled by <@U0876C3TEGL>/);
 });
+test('card stored by Slack with the calendar as its own emoji element still gets the set time',()=>{
+ const blocks=[{type:'rich_text',block_id:'wo_main',elements:[{type:'rich_text_section',elements:[{type:'text',text:'132366\n387458-1\n\nJason\n\n'},{type:'emoji',name:'date',unicode:'1f4c5'},{type:'text',text:' Tenant availability:\nThursday 11/12/2026: 1:00pm-5:00pm PST\nFriday 11/13/2026: 10:00am-2:00pm PST, 1:00pm-5:00pm PST\n\nVendor / access instructions:'}]}]}];
+ assert.equal(af.scheduleOnBlocks(blocks,'📅 Scheduled: Fri 1 PM'),true);
+ assert.deepEqual(blocks[0].elements[0].elements,[{type:'text',text:'132366\n387458-1\n\nJason\n\n📅 Scheduled: Fri 1 PM\n\nVendor / access instructions:'}]);
+ assert.equal(af.withScheduled('a\n\n:date: Tenant availability:\nx\n\nVendor / access instructions:','📅 Scheduled: Y'),'a\n\n📅 Scheduled: Y\n\nVendor / access instructions:');
+ const linked=[{type:'rich_text',block_id:'wo_main',elements:[{type:'rich_text_section',elements:[{type:'text',text:'a'},{type:'link',url:'https://x.y'}]}]}];assert.equal(af.scheduleOnBlocks(linked,'z'),false);assert.equal(linked[0].elements[0].elements.length,2);
+});
