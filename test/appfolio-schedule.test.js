@@ -118,3 +118,29 @@ test('own-time view offers 4-hour windows by start hour',()=>{
  const v=af.ownTimeView(call,{});const opts=v.blocks.find(b=>b.block_id==='own_time').element.options;
  assert.equal(opts[0].value,'07:00');assert.ok(opts.some(o=>o.text.text==='9 AM – 1 PM'&&o.value==='09:00'));assert.ok(opts.some(o=>o.text.text==='3 PM – 7 PM'&&o.value==='15:00'));
 });
+test('scheduled time replaces the tenant availability list on the card',()=>{
+ const body='132366\n387458-1\n\nJason\n\n📅 Tenant availability:\nThursday 11/12/2026: 1:00pm-5:00pm PST\nFriday 11/13/2026: 10:00am-2:00pm PST,\n1:00pm-5:00pm PST\n\nVendor / access instructions:\nkey';
+ const out=af.withScheduled(body,'📅 Scheduled: Fri 11/13/26: 1:00 pm - 5:00 pm PST (booked in AppFolio)');
+ assert.equal(out,'132366\n387458-1\n\nJason\n\n📅 Scheduled: Fri 11/13/26: 1:00 pm - 5:00 pm PST (booked in AppFolio)\n\nVendor / access instructions:\nkey');
+ assert.equal(af.withScheduled(out,'📅 Scheduled: X'),'132366\n387458-1\n\nJason\n\n📅 Scheduled: X\n\nVendor / access instructions:\nkey');
+ assert.equal(af.withScheduled('a\n\nVendor / access instructions:\nk','📅 Scheduled: X'),'a\n\n📅 Scheduled: X\n\nVendor / access instructions:\nk');
+ assert.equal(af.withScheduled('a','📅 Scheduled: X'),'a\n\n📅 Scheduled: X');
+});
+test('card button: time is written on the card and the Assistant alert for that call is closed',async()=>{
+ const log=[],c={invoice:'132366',workOrder:'387458-1'},btn=v=>({type:'actions',block_id:'tps_appfolio_pick',elements:[{type:'button',action_id:'tps_appfolio_pick_time',value:JSON.stringify(v)}]});
+ const card={ts:'1794570742.000100',text:'132366',blocks:[{type:'rich_text',block_id:'wo_main',elements:[{type:'rich_text_section',elements:[{type:'text',text:'132366\n387458-1\n\n📅 Tenant availability:\nFriday 11/13/2026: 1:00pm-5:00pm PST\n\nVendor / access instructions:'}]}]},btn(c)]};
+ const alerts=[{ts:'1794570742.217879',blocks:[btn(c)]},{ts:'1794570795.393719',blocks:[btn({invoice:'132367',workOrder:'387534-1'})]}];
+ const fetch=async(url,o={})=>{
+  if(url.includes('tps-appfolio-schedule-picker'))return{ok:true,text:async()=>JSON.stringify({status:'booked',appointment:'Scheduled For: 11/13/26'})};
+  if(url.includes('conversations.history')){const ch=new URL(url).searchParams.get('channel');log.push(['history',ch,o.headers.Authorization]);return{json:async()=>({ok:true,messages:ch==='DASSIST'?alerts:[card]})};}
+  const m=url.split('/').pop(),b=JSON.parse(o.body);log.push([m,b,o.headers.Authorization]);return{json:async()=>({ok:true,channel:{id:'DASSIST'},view:{id:'V1'}})};
+ };
+ const start=Date.now()+3600000,meta={...c,channel:'C0C2XUL7ZHN',cardTs:card.ts,incomingTs:'',recordId:''};
+ const p={type:'view_submission',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},view:{id:'V2',private_metadata:JSON.stringify(meta),state:{values:{window:{slot:{selected_option:{text:{text:'Fri 11/13/26: 1:00 pm - 5:00 pm PST'},value:JSON.stringify({id:'timeslot-1',start,end:start+4*3600000})}}}}}}};
+ const out=await af.route(p,{fetch,TPS_BOT_TOKEN:'xoxb-bot',assistantToken:'xoxb-assistant',key:'k',now:start-3600000});
+ assert.equal(out.booked,true);
+ const cardUpd=log.find(x=>x[0]==='chat.update'&&x[1].channel==='C0C2XUL7ZHN');
+ assert.equal(cardUpd[1].blocks.length,1);assert.match(cardUpd[1].blocks[0].elements[0].elements[0].text,/📅 Scheduled: .*\(booked in AppFolio\)\n\nVendor/);assert.doesNotMatch(cardUpd[1].blocks[0].elements[0].elements[0].text,/Tenant availability/);
+ const closed=log.filter(x=>x[0]==='chat.update'&&x[1].channel==='DASSIST');
+ assert.equal(closed.length,1);assert.equal(closed[0][1].ts,'1794570742.217879');assert.equal(closed[0][2],'Bearer xoxb-assistant');assert.match(closed[0][1].text,/132366 · WO 387458-1 scheduled by <@U0876C3TEGL>/);
+});

@@ -86,7 +86,10 @@ async function route(p,options={}){
   let view;
   try{
    const out=await callPicker({mode:'read',invoice:call.invoice,workOrder:call.workOrder},options);
-   if(out.status==='already_scheduled')await removeButton(meta,options).catch(e=>console.error('appfolio button removal',e.message));
+   if(out.status==='already_scheduled'){
+    await removeButton(meta,options).catch(e=>console.error('appfolio button removal',e.message));
+    await closeAlerts(call,`:white_check_mark: Invoice ${call.invoice} · WO ${call.workOrder} is already scheduled in AppFolio.`,options).catch(e=>console.error('appfolio alert cleanup',e.message));
+   }
    view=out.status==='options'?pickerView(call,out.slots,meta)
     :out.status==='already_scheduled'?infoView('AppFolio scheduling',`Work order *${call.workOrder}* is already scheduled in AppFolio:\n${out.appointment||''}`)
     :infoView('AppFolio scheduling',`AppFolio could not be read for work order *${call.workOrder}* (${out.step||out.status}). Try again in a minute, or check the work order in AppFolio.`);
@@ -118,7 +121,7 @@ async function route(p,options={}){
  }catch{text='AppFolio could not be reached. Check the work order in AppFolio before trying again.';}
  const when=own?(ownOk?own:null):booked?pacific(selection.start):null;let routed='';
  // Scheduled (or AppFolio says it already was): take the button off the card before it moves.
- if(when||out?.status==='already_scheduled')await removeButton(meta,options).catch(e=>console.error('appfolio button removal',e.message));
+ if(when||out?.status==='already_scheduled')await removeButton(meta,options,when?label+(booked?' (booked in AppFolio)':''):'').catch(e=>console.error('appfolio button removal',e.message));
  if(when)routed=await routeCard(p,meta,when,options);
  await ui('views.update',{view_id:p.view.id,view:infoView('AppFolio scheduling',text+(routed?'\n\n'+routed:''))}).catch(()=>{});
  if(when&&/^D/.test(meta.dm?.channel||'')&&/^\d{10}\.\d{6}$/.test(meta.dm?.ts||'')){
@@ -134,6 +137,7 @@ async function route(p,options={}){
    await slack(moved?'chat.delete':'chat.update',moved?{channel:meta.dm.channel,ts:meta.dm.ts}:said).catch(e=>console.error('appfolio dm update',e.message));
   }
  }
+ if(when||out?.status==='already_scheduled')await closeAlerts(meta,when?`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} scheduled by <@${p.user.id}>: ${label||out?.appointment||''}${routed?'\n'+routed:''}`:`:white_check_mark: Invoice ${meta.invoice} · WO ${meta.workOrder} is already scheduled in AppFolio.`,options,options.viewToken?meta.dm?.ts:'').catch(e=>console.error('appfolio alert cleanup',e.message));
  if(booked&&/^\d{10}\.\d{6}$/.test(meta.incomingTs||'')){
   await slack('chat.postMessage',{channel:INCOMING,thread_ts:meta.incomingTs,text:`:calendar: AppFolio appointment booked by <@${p.user.id}> for WO ${meta.workOrder}: ${label||out.appointment||''}`,unfurl_links:false}).catch(e=>console.error('appfolio schedule log',e.message));
  }
@@ -148,18 +152,46 @@ async function findAssignCard(call,options={}){
  const m=(j.messages||[]).find(x=>(x.blocks||[]).some(b=>b.type==='actions'&&(b.elements||[]).some(e=>{if(e.action_id!==ACTION)return false;try{const v=JSON.parse(e.value);return v.invoice===call.invoice&&v.workOrder===call.workOrder;}catch{return false;}})));
  return m?{channel:ASSIGN,cardTs:m.ts,incomingTs:incomingTs(m.blocks),recordId:recordId(m.blocks)}:null;
 }
-// Removes the Pick AppFolio time button from a TPS Bot card, leaving everything else as it is.
-async function removeButton(meta,options={}){
+// Paul 2026-11-13: once scheduled, the card shows the time that was set instead of every time the tenant offered.
+function withScheduled(text,line){
+ const t=String(text||'');
+ if(/📅 (?:Tenant availability|Scheduled):/u.test(t))return t.replace(/📅 (?:Tenant availability|Scheduled):[\s\S]*?(?=\n\nVendor \/ access instructions:|\n\nProperty notes:|\n\nWORK ORDER|$)/u,line);
+ return /\n\nVendor \/ access instructions:/.test(t)?t.replace(/\n\nVendor \/ access instructions:/,'\n\n'+line+'\n\nVendor / access instructions:'):t+'\n\n'+line;
+}
+// Removes the Pick AppFolio time button from a TPS Bot card and, when a time was set, writes it on the card.
+// Everything else on the card stays as it is.
+async function removeButton(meta,options={},scheduled=''){
  if(!/^C/.test(meta.channel||'')||!/^\d{10}\.\d{6}$/.test(meta.cardTs||''))return false;
  const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN,fetcher=options.fetch||global.fetch;
  const url=new URL('https://slack.com/api/conversations.history');for(const[k,v]of Object.entries({channel:meta.channel,oldest:meta.cardTs,latest:meta.cardTs,inclusive:'true',limit:'1'}))url.searchParams.set(k,v);
  const r=await fetcher(url.href,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)}),j=await r.json();
  if(!j.ok)throw Error('conversations.history: '+j.error);
  const m=(j.messages||[]).find(x=>x.ts===meta.cardTs);if(!m||!Array.isArray(m.blocks))return false;
- const blocks=m.blocks.filter(b=>!(b.type==='actions'&&(b.elements||[]).some(e=>e.action_id===ACTION)));
- if(blocks.length===m.blocks.length)return false;
- await slackApi('chat.update',{channel:meta.channel,ts:meta.cardTs,text:m.text||'',blocks},token,fetcher);
+ const blocks=JSON.parse(JSON.stringify(m.blocks.filter(b=>!(b.type==='actions'&&(b.elements||[]).some(e=>e.action_id===ACTION)))));
+ let text=m.text||'';
+ if(scheduled){
+  const line='📅 Scheduled: '+scheduled;
+  const first=blocks.find(b=>b.block_id==='wo_main')?.elements?.[0]?.elements?.find(e=>e.type==='text'&&typeof e.text==='string');
+  if(first)first.text=withScheduled(first.text,line);
+  if(/📅 (?:Tenant availability|Scheduled):/u.test(text))text=withScheduled(text,line);
+ }
+ if(JSON.stringify(blocks)===JSON.stringify(m.blocks)&&text===(m.text||''))return false;
+ await slackApi('chat.update',{channel:meta.channel,ts:meta.cardTs,text,blocks},token,fetcher);
  return true;
+}
+// The "Schedule this call" alerts for this call in the TPS Assistant messages turn into one line once the call is
+// scheduled, wherever it was scheduled from (the card button or the alert itself).
+const ALERT_USER='U0876C3TEGL';
+async function closeAlerts(call,done,options={},skipTs=''){
+ const token=options.assistantToken??process.env.TPS_ASSISTANT_BOT_TOKEN,fetcher=options.fetch||global.fetch;
+ if(!token||!validCall(call))return 0;
+ const im=await slackApi('conversations.open',{users:ALERT_USER},token,fetcher);
+ const url=new URL('https://slack.com/api/conversations.history');url.searchParams.set('channel',im.channel.id);url.searchParams.set('limit','100');
+ const r=await fetcher(url.href,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)}),j=await r.json();
+ if(!j.ok)throw Error('conversations.history: '+j.error);
+ const mine=(j.messages||[]).filter(x=>x.ts!==skipTs&&(x.blocks||[]).some(b=>b.type==='actions'&&(b.elements||[]).some(e=>{if(e.action_id!==ACTION)return false;try{const v=JSON.parse(e.value);return v.invoice===call.invoice&&v.workOrder===call.workOrder;}catch{return false;}})));
+ for(const m of mine)await slackApi('chat.update',{channel:im.channel.id,ts:m.ts,text:done,blocks:[md(done)]},token,fetcher);
+ return mine.length;
 }
 // After a time is set: a later day moves the Please Assign card to Future Calls at that time
 // (the same Reschedule request the Job Board sends); today leaves it in Please Assign.
@@ -177,4 +209,4 @@ async function routeCard(p,meta,when,options={}){
  }catch(e){return 'The card could not be moved to Future Calls ('+e.message+'). Use Reschedule on it.';}
 }
 
-module.exports={findAssignCard,removeButton,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
+module.exports={findAssignCard,removeButton,closeAlerts,withScheduled,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
