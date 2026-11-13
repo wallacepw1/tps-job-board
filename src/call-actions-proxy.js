@@ -4,6 +4,7 @@ const {parseRef,presentJobFiles,FILES_ACTION,FILES_VIDEO_TEST_ACTION,openFilesMo
 const desc=require('./desc-modal');
 const cancellation=require('./cancellation-review');
 const appfolioSchedule=require('./appfolio-schedule');
+const meldSchedule=require('./meld-schedule');
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
 function verifySlackRequest(raw,headers,secret,now=Date.now()){
  const ts=headers['x-slack-request-timestamp'],signature=headers['x-slack-signature'];
@@ -66,6 +67,16 @@ function registerCallActionsProxy(receiver,options={}){
      const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN;
      await require('./job-files').slackApi(payload.view?.id?'views.update':'views.open',payload.view?.id?{view_id:payload.view.id,view:cancellation.resultView(e.message)}:{trigger_id:payload.trigger_id,view:cancellation.resultView(e.message)},token,options.fetch||global.fetch).catch(()=>{});
     }
+    return;
+   }
+   // Reschedule on a Meld call card: the time is set in Meld (Paul 2026-11-13), then the card moves.
+   if(meldSchedule.intercepts(payload)){
+    if(payload.type==='view_submission'){
+     const error=meldSchedule.submissionError(payload);
+     if(error){res.status(200).json({response_action:'errors',errors:error});return;}
+     res.status(200).json({response_action:'update',view:meldSchedule.infoView('Meld scheduling',meldSchedule.pendingText(payload))});
+    }else res.status(200).send('');
+    meldSchedule.route(payload,options).catch(e=>console.error('meld schedule',e.message));
     return;
    }
    // "Pick AppFolio time" on a call card: read tenant windows from AppFolio and book the one an admin picks.
