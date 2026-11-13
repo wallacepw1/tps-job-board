@@ -50,7 +50,7 @@ async function submitAssignment(request,{fetch:fetcher=global.fetch,endpoint=pro
 }
 function registerAssignmentHandlers(app,{store,refresh,publishHome,messageModal,submit=submitAssignment,signingKey=()=>process.env.SLACK_SIGNING_SECRET}){
  const finish=async(request,body,client)=>{
-  let result;try{result=await submit(request);for(let i=0;i<6&&['queued','working'].includes(result.status);i++){await new Promise(r=>setTimeout(r,4000));result=await submit(request,{mode:'status'});}}catch{result={status:'uncertain',error:'The queue response was interrupted. Check the existing call before trying again.'};}
+  let result;try{result=await submit(request);for(let i=0;i<12&&['queued','working','uncertain'].includes(result.status);i++){await new Promise(r=>setTimeout(r,4000));result=await submit(request,{mode:'status'});}}catch{result={status:'uncertain',error:'The queue response was interrupted. Check the existing call before trying again.'};}
   const text=result.status==='done'?'✅ Saved. The call history and Job Board have been updated.':result.error||'⏳ Still queued. Refresh shortly; do not repeat the action.';
   await client.views.update({view_id:body.view.id,view:messageModal('Call update',text)}).catch(()=>{});
   if(result.status==='done'){await refresh();await publishHome(client,body.user.id).catch(()=>{});}
