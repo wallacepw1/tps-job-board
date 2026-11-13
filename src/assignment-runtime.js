@@ -6,6 +6,7 @@ const {createHelperService,revision}=require('./assignment-helper');
 const {callFeedback}=require('./assignment-route');
 const LIST='F0C39RE7HDK',INCOMING='C0C19TG3KJ6',ASSIGN='C0C2XUL7ZHN',FUTURE='C0C2XB4VD1N',COMPLETED='C0C2YDBHFFY';
 const ROUTE='https://webhook.latenode.com/27333/prod/eb873fbf-b964-4cf3-a704-adeb16274831';
+const DISPATCH_WAIT_MS=8000;
 const hash=v=>createHash('sha256').update(String(v)).digest('hex');
 function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,serialized=false,token,now=()=>new Date(),copyContribution,adminSlack}){
  const get=async k=>{const v=await store.getGlobalVariable(k);if(!v)return null;return typeof v==='string'?JSON.parse(v):v;};
@@ -98,7 +99,11 @@ function createRuntime({store,slack,fetch:fetcher=global.fetch,key,actor,seriali
   const existing=await get(capKey);
   if(existing?.used)throw Error('A dispatched change must be reconciled, never repeated.');
   await set(capKey,{used:false,expires:now().getTime()+10*60e3,requestId:r.requestId,payload});
-  const response=await fetcher(ROUTE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload:JSON.stringify({tps_assignment_dispatch:r.requestId,key})}),signal:AbortSignal.timeout(90000)});
+  // Call Route keeps running after we stop listening. Waiting for its full reply (30 s+ when it copies a thread)
+  // would outlast the worker's store access, so only wait briefly; verification happens on the next run.
+  let response;
+  try{response=await fetcher(ROUTE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload:JSON.stringify({tps_assignment_dispatch:r.requestId,key})}),signal:AbortSignal.timeout(DISPATCH_WAIT_MS)});}
+  catch(e){if(e?.name==='TimeoutError'||e?.name==='AbortError')return;throw e;}
   if(!response.ok)throw Error('The routing response was interrupted.');
  };
  ctx.verifyDispatch=async(r,c)=>{
