@@ -162,3 +162,63 @@ test('tenant times that have passed come off the card list',()=>{
  assert.equal(af.dropPast('a\n\n📅 Scheduled: X',now),'a\n\n📅 Scheduled: X');
  assert.equal(af.withScheduled(af.dropPast('a\n\n📅 Tenant availability:\nThursday 11/12/2026: 1:00pm-5:00pm PST\n\nVendor / access instructions:',now),'📅 Scheduled: Y'),'a\n\n📅 Scheduled: Y\n\nVendor / access instructions:');
 });
+
+// Paul 2026-11-13: one scheduler per card. Reschedule on an AppFolio card goes through AppFolio.
+const rsCard={ts:'1794570797.362939',text:'132367',blocks:[{type:'rich_text',block_id:'wo_main',elements:[{type:'rich_text_section',elements:[{type:'text',text:'132367\n387534-1\nTorrey Pines\n\n'},{type:'emoji',name:'date',unicode:'1f4c5'},{type:'text',text:' Scheduled: 2026-11-13 10 AM – 2 PM (booked in AppFolio)'}]}]},{type:'divider',block_id:'tpsref:RecAB12:1794570796.200049'},{type:'actions',block_id:'action_buttons_block',elements:[{type:'button',action_id:'future_calls'}]}]};
+const rsPress=(user='U0876C3TEGL',channel='C0C2XB4VD1N',message=rsCard)=>({type:'block_actions',team:{id:'T086X85G14N'},user:{id:user},trigger_id:'t',actions:[{action_id:'future_calls'}],channel:{id:channel},message});
+test('Reschedule is taken over only for admins on AppFolio cards in Please Assign or Future Calls',()=>{
+ assert.deepEqual(af.cardCall(rsCard),{invoice:'132367',workOrder:'387534-1'});
+ assert.equal(af.intercepts(rsPress()),true);
+ assert.equal(af.intercepts(rsPress('U0876C3TEGL','C0C2XUL7ZHN')),true);
+ assert.equal(af.intercepts(rsPress('U0C2TELAYKE')),false);
+ assert.equal(af.intercepts(rsPress('U0876C3TEGL','C0EDGAR0001')),false);
+ const meld={...rsCard,blocks:[{type:'rich_text',block_id:'wo_main',elements:[{type:'rich_text_section',elements:[{type:'text',text:'132344\nTBG7EL3\nTyco'}]}]}]};
+ assert.equal(af.intercepts(rsPress('U0876C3TEGL','C0C2XB4VD1N',meld)),false);
+});
+test('Reschedule on a card booked in AppFolio offers AppFolio reschedule plus No date/time',async()=>{
+ const log=[];const fetch=fakeSlack(log,{picker:b=>({status:'already_scheduled',appointment:'Schedule Reschedule Scheduled For: 11/13/26 Arrival Window 4 hours Time 10:00 AM Timezone PST'})});
+ await af.route(rsPress(),{fetch,TPS_BOT_TOKEN:'x',key:'k'});
+ const v=log.find(x=>x[0]==='views.update')[1].view;
+ assert.equal(v.title.text,'Reschedule in AppFolio');assert.match(v.blocks[0].text.text,/11\/13\/26 10:00 AM/);
+ const meta=JSON.parse(v.private_metadata);assert.equal(meta.reschedule,true);assert.equal(meta.via,'reschedule');assert.equal(meta.recordId,'RecAB12');
+ assert.ok(v.blocks.some(b=>b.block_id==='no_date'));
+ assert.equal(log.filter(x=>x[0]==='chat.update').length,0);
+});
+test('Reschedule with tenant times ahead shows only scheduling choices; none left adds No date/time; unreadable AppFolio is card only',async()=>{
+ let log=[];await af.route(rsPress(),{fetch:fakeSlack(log,{picker:()=>({status:'options',slots:[{id:'timeslot-1',label:'Mon',start:Date.now()+86400000,end:Date.now()+90000000}]})}),TPS_BOT_TOKEN:'x'});
+ let v=log.find(x=>x[0]==='views.update')[1].view;assert.equal(v.title.text,'Schedule in AppFolio');assert.ok(!v.blocks.some(b=>b.block_id==='no_date'));
+ log=[];await af.route(rsPress(),{fetch:fakeSlack(log,{picker:()=>({status:'options',slots:[]})}),TPS_BOT_TOKEN:'x'});
+ v=log.find(x=>x[0]==='views.update')[1].view;assert.ok(v.blocks.some(b=>b.block_id==='no_date'));assert.equal(v.blocks.find(b=>b.block_id==='own_date').optional,true);
+ log=[];await af.route(rsPress(),{fetch:fakeSlack(log,{picker:()=>({status:'unverified',step:'login'})}),TPS_BOT_TOKEN:'x'});
+ v=log.find(x=>x[0]==='views.update')[1].view;assert.equal(JSON.parse(v.private_metadata).cardOnly,true);assert.match(v.blocks[0].text.text,/not\* changed/);
+});
+const rsSubmit=(meta,values)=>({type:'view_submission',team:{id:'T086X85G14N'},user:{id:'U0876C3TEGL'},view:{id:'V9',callback_id:af.CALLBACK,private_metadata:JSON.stringify({invoice:'132367',workOrder:'387534-1',channel:'C0C2XB4VD1N',cardTs:rsCard.ts,incomingTs:'1794570796.200049',recordId:'RecAB12',via:'reschedule',...meta}),state:{values}}});
+const noDate={no_date:{none:{selected_options:[{value:'none'}]}}};
+const ownLater=d=>({own_date:{date:{selected_date:d}},own_time:{time:{selected_option:{value:'09:00'}}}});
+test('No date/time moves only the card; AppFolio is never called',async()=>{
+ const log=[],sent=[];const fetch=fakeSlack(log,{picker:()=>{throw Error('AppFolio must not be called');}});
+ const p=rsSubmit({},noDate);assert.equal(af.submissionError(p),null);assert.match(af.pendingText(p),/not changed/);
+ const r=await af.route(p,{fetch,TPS_BOT_TOKEN:'x',submitAssignment:async q=>{sent.push(q);return{status:'done'};}});
+ assert.equal(sent.length,1);assert.deepEqual(sent[0].schedule,{noDate:true});assert.equal(sent[0].operation,'reschedule');
+ assert.ok(!log.some(x=>x[0]==='picker'));assert.match(r.routed,/no date\/time/);
+ assert.ok(af.submissionError(rsSubmit({},{...noDate,...ownLater('2099-01-05')})));
+ assert.ok(af.submissionError({...rsSubmit({via:''},noDate)}));
+});
+test('Reschedule submit moves the AppFolio appointment, then the card',async()=>{
+ const log=[],sent=[];const fetch=fakeSlack(log,{picker:b=>b.mode==='reserve'?{status:'booked',appointment:'Scheduled For: 1/5/99 Arrival Window 4 hours Time 9:00 AM'}:{status:'already_scheduled'}});
+ const p=rsSubmit({reschedule:true},ownLater('2099-01-05'));assert.match(af.pendingText(p),/Rescheduling in AppFolio/);
+ const r=await af.route(p,{fetch,TPS_BOT_TOKEN:'x',key:'k',submitAssignment:async q=>{sent.push(q);return{status:'done'};}});
+ const pk=log.find(x=>x[0]==='picker')[1];assert.deepEqual(pk.selection,{custom:true,reschedule:true,date:'2099-01-05',time:'09:00'});
+ assert.equal(r.booked,true);assert.deepEqual(sent[0].schedule,{date:'2099-01-05',time:'09:00'});
+ assert.match(log.find(x=>x[0]==='chat.postMessage'&&x[1].channel==='C0C19TG3KJ6')[1].text,/rescheduled by/);
+});
+test('Reschedule that AppFolio does not confirm leaves the card where it is',async()=>{
+ const log=[],sent=[];const fetch=fakeSlack(log,{picker:()=>({status:'unverified',step:'rescheduled: x'})});
+ const r=await af.route(rsSubmit({reschedule:true},ownLater('2099-01-05')),{fetch,TPS_BOT_TOKEN:'x',key:'k',submitAssignment:async q=>{sent.push(q);return{status:'done'};}});
+ assert.equal(r.booked,false);assert.equal(sent.length,0);
+});
+test('Card-only (AppFolio unreadable) moves the card without calling AppFolio',async()=>{
+ const log=[],sent=[];const fetch=fakeSlack(log,{picker:()=>{throw Error('AppFolio must not be called');}});
+ await af.route(rsSubmit({cardOnly:true},ownLater('2099-01-05')),{fetch,TPS_BOT_TOKEN:'x',submitAssignment:async q=>{sent.push(q);return{status:'done'};}});
+ assert.ok(!log.some(x=>x[0]==='picker'));assert.deepEqual(sent[0].schedule,{date:'2099-01-05',time:'09:00'});
+});
