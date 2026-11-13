@@ -76,3 +76,15 @@ test('offer needs 2-3 windows that do not overlap; card waits at the first windo
  assert.deepEqual(sent[0].schedule,{date:'2099-01-05',time:'08:00'});
  assert.match(JSON.stringify(log.find(x=>x[0]==='chat.update')[1].blocks),/Waiting for the resident: Jan 5 8-12 or Jan 6 1-5 \(offered in Meld\)/);
 });
+test('plumber channels: admin Reschedule on AppFolio and Meld cards is taken over; card moves with the plumber as expected lead',async()=>{
+ const eduardo='C0C1M4CRKSB';
+ assert.equal(ms.intercepts(press({channel:{id:eduardo}})),true);
+ assert.equal(ms.intercepts(press({channel:{id:eduardo},user:{id:'U0C2MSLLS1L'}})),false);
+ const afCard={blocks:[{block_id:'wo_main',elements:[{elements:[{type:'text',text:'132315\n33717-1'}]}]}]};
+ assert.equal(af.intercepts({type:'block_actions',...ADMIN,actions:[{action_id:'future_calls'}],channel:{id:eduardo},message:afCard}),true);
+ const log=[],sent=[];const p=submit({mode:'move',channel:eduardo},win(1,'2099-01-05','09:00'));
+ await ms.route(p,opts(log,()=>({status:'moved',booked:{label:'x',start:'2099-01-05T17:00:00Z'}}),sent));
+ assert.equal(sent[0].expectedLead,'U0C2MSLLS1L');assert.deepEqual(sent[0].schedule,{date:'2099-01-05',time:'09:00'});
+ const today=af.pacific(Date.now()).date;
+ assert.match(await af.routeCard(p,{channel:eduardo},{date:today,time:'09:00'},{}),/stays with the plumber/);
+});
