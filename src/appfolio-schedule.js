@@ -90,6 +90,8 @@ async function route(p,options={}){
     await removeButton(meta,options).catch(e=>console.error('appfolio button removal',e.message));
     await closeAlerts(call,`:white_check_mark: Invoice ${call.invoice} · WO ${call.workOrder} is already scheduled in AppFolio.`,options).catch(e=>console.error('appfolio alert cleanup',e.message));
    }
+   // Opening the scheduler also tidies the card: tenant times that have passed come off it.
+   else await removeButton(meta,options,'',true).catch(e=>console.error('appfolio past times',e.message));
    view=out.status==='options'?pickerView(call,out.slots,meta)
     :out.status==='already_scheduled'?infoView('AppFolio scheduling',`Work order *${call.workOrder}* is already scheduled in AppFolio:\n${out.appointment||''}`)
     :infoView('AppFolio scheduling',`AppFolio could not be read for work order *${call.workOrder}* (${out.step||out.status}). Try again in a minute, or check the work order in AppFolio.`);
@@ -161,30 +163,57 @@ function withScheduled(text,line){
 }
 // Slack stores the card's 📅 as its own emoji element between two text elements, so the card body is put back
 // together, changed, and written as one text element. Cards holding anything else (links, mentions) are left alone.
-function scheduleOnBlocks(blocks,line){
+function cardText(blocks,change){
  const section=blocks.find(b=>b.block_id==='wo_main')?.elements?.[0];
  if(!section||!Array.isArray(section.elements)||!section.elements.length)return false;
  if(!section.elements.every(e=>e.type==='text'&&typeof e.text==='string'&&!e.style||e.type==='emoji'&&(e.unicode||e.name)))return false;
  const whole=section.elements.map(e=>e.type==='text'?e.text:e.unicode?String.fromCodePoint(...e.unicode.split('-').map(x=>parseInt(x,16))):':'+e.name+':').join('');
- section.elements=[{type:'text',text:withScheduled(whole,line)}];
+ const next=change(whole);if(next===whole)return false;
+ section.elements=[{type:'text',text:next}];
  return true;
+}
+function scheduleOnBlocks(blocks,line){return cardText(blocks,t=>withScheduled(t,line));}
+// Paul 2026-11-13: tenant times that have already passed are no use on a card. Days before today and today's
+// windows that have ended are taken off the "Tenant availability" list. A list that cannot be read is left alone.
+function dropPast(text,now=Date.now()){
+ const {date:today,time:clock}=pacific(now),h24=(h,m,ap)=>String((+h%12)+(/p/i.test(ap)?12:0)).padStart(2,'0')+':'+m;
+ return String(text||'').replace(new RegExp('('+MARK+' Tenant availability:)\\n([\\s\\S]*?)(?=\\n\\nVendor \\/ access instructions:|\\n\\nProperty notes:|\\n\\nWORK ORDER|$)','u'),(all,head,body)=>{
+  const days=[];
+  for(const raw of body.split('\n')){
+   const line=raw.trim();if(!line)continue;
+   const d=line.match(/^([A-Za-z]+) (\d{1,2})\/(\d{1,2})\/(\d{4}):\s*(.*)$/);
+   if(d)days.push({name:d[1]+' '+d[2]+'/'+d[3]+'/'+d[4],date:d[4]+'-'+d[2].padStart(2,'0')+'-'+d[3].padStart(2,'0'),windows:d[5]});
+   else if(days.length)days[days.length-1].windows+=' '+line;else return all;
+  }
+  const kept=[];let dropped=false;
+  for(const d of days){
+   const windows=d.windows.split(',').map(w=>w.trim()).filter(Boolean),stay=[];
+   for(const w of windows){
+    const m=w.match(/^\d{1,2}:\d{2}\s*[ap]m\s*-\s*(\d{1,2}):(\d{2})\s*([ap]m)\b/i);if(!m)return all;
+    if(d.date>today||d.date===today&&h24(m[1],m[2],m[3])>clock)stay.push(w);else dropped=true;
+   }
+   if(stay.length)kept.push(d.name+': '+stay.join(', '));
+  }
+  if(!dropped)return all;
+  return kept.length?head+'\n'+kept.join('\n'):head+' the times the tenant offered have passed.';
+ });
 }
 // Removes the Pick AppFolio time button from a TPS Bot card and, when a time was set, writes it on the card.
 // Everything else on the card stays as it is.
-async function removeButton(meta,options={},scheduled=''){
+async function removeButton(meta,options={},scheduled='',keepButton=false){
  if(!/^C/.test(meta.channel||'')||!/^\d{10}\.\d{6}$/.test(meta.cardTs||''))return false;
  const token=options.TPS_BOT_TOKEN||process.env.TPS_BOT_TOKEN,fetcher=options.fetch||global.fetch;
  const url=new URL('https://slack.com/api/conversations.history');for(const[k,v]of Object.entries({channel:meta.channel,oldest:meta.cardTs,latest:meta.cardTs,inclusive:'true',limit:'1'}))url.searchParams.set(k,v);
  const r=await fetcher(url.href,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)}),j=await r.json();
  if(!j.ok)throw Error('conversations.history: '+j.error);
  const m=(j.messages||[]).find(x=>x.ts===meta.cardTs);if(!m||!Array.isArray(m.blocks))return false;
- const blocks=JSON.parse(JSON.stringify(m.blocks.filter(b=>!(b.type==='actions'&&(b.elements||[]).some(e=>e.action_id===ACTION)))));
+ const blocks=JSON.parse(JSON.stringify(m.blocks.filter(b=>keepButton||!(b.type==='actions'&&(b.elements||[]).some(e=>e.action_id===ACTION)))));
  let text=m.text||'';
  if(scheduled){
   const line='📅 Scheduled: '+scheduled;
   scheduleOnBlocks(blocks,line);
   if(new RegExp(MARK+' (?:Tenant availability|Scheduled):','u').test(text))text=withScheduled(text,line);
- }
+ }else if(keepButton){cardText(blocks,t=>dropPast(t,options.now));text=dropPast(text,options.now);}
  if(JSON.stringify(blocks)===JSON.stringify(m.blocks)&&text===(m.text||''))return false;
  await slackApi('chat.update',{channel:meta.channel,ts:meta.cardTs,text,blocks},token,fetcher);
  return true;
@@ -219,4 +248,4 @@ async function routeCard(p,meta,when,options={}){
  }catch(e){return 'The card could not be moved to Future Calls ('+e.message+'). Use Reschedule on it.';}
 }
 
-module.exports={findAssignCard,removeButton,closeAlerts,withScheduled,scheduleOnBlocks,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
+module.exports={dropPast,findAssignCard,removeButton,closeAlerts,withScheduled,scheduleOnBlocks,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
