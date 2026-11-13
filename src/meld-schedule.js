@@ -1,5 +1,5 @@
 'use strict';
-// Reschedule on a Meld call card (Please Assign or Future Calls) goes through Meld (Paul 2026-11-13: Meld wants all
+// Reschedule on a Meld call card (Please Assign, Future Calls or a plumber channel; admins only) goes through Meld (Paul 2026-11-13: Meld wants all
 // scheduling done in Meld). The TPS Meld Scheduler scenario in Latenode does the Meld side and keeps Meld Intake's
 // records in step; this file shows the choices and moves the card.
 //  - Booked in Meld: pick a new date + 4-hour window; Meld moves the appointment and tells the resident.
@@ -25,7 +25,7 @@ function meldCall(m){
 }
 function reschedulePress(p){
  if(p?.type!=='block_actions'||p.actions?.[0]?.action_id!==af.RESCHEDULE||!isAdmin(p))return false;
- return [ASSIGN,FUTURE].includes(p.channel?.id||p.container?.channel_id)&&!!meldCall(p.message);
+ return af.CARD_CHANNELS.includes(p.channel?.id||p.container?.channel_id)&&!!meldCall(p.message);
 }
 function intercepts(p){return reschedulePress(p)||(p?.type==='view_submission'&&p.view?.callback_id===CALLBACK);}
 
