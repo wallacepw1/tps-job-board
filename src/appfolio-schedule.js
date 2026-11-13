@@ -6,10 +6,14 @@
 const {slackApi}=require('./job-files');
 const {randomUUID}=require('node:crypto');
 const {submitAssignment}=require('./assignment');
+const {TECHS}=require('./assignment-policy');
+// Plumber channels: Reschedule there by an admin also goes through AppFolio/Meld (Paul 2026-11-13, one scheduler per card).
+const PLUMBER=Object.fromEntries(TECHS.map(t=>[t.channel,t.id]));
 const PICKER='https://webhook.latenode.com/27333/prod/tps-appfolio-schedule-picker';
 const ACTION='tps_appfolio_pick_time';
 const CALLBACK='tps_appfolio_pick_time_modal';
 const INCOMING='C0C19TG3KJ6',ASSIGN='C0C2XUL7ZHN',FUTURE='C0C2XB4VD1N';
+const CARD_CHANNELS=[ASSIGN,FUTURE,...TECHS.map(t=>t.channel)];
 // Paul 2026-11-13 (one scheduler per card): Reschedule on an AppFolio card in Please Assign or Future Calls opens
 // this scheduler instead of the plain one, so the card time and AppFolio stay the same.
 const RESCHEDULE='future_calls';
@@ -27,7 +31,7 @@ function cardCall(m){
 }
 function reschedulePress(p){
  if(p?.type!=='block_actions'||p.actions?.[0]?.action_id!==RESCHEDULE||!isAdmin(p))return false;
- return [ASSIGN,FUTURE].includes(p.channel?.id||p.container?.channel_id)&&!!cardCall(p.message);
+ return CARD_CHANNELS.includes(p.channel?.id||p.container?.channel_id)&&!!cardCall(p.message);
 }
 function intercepts(p){return (p?.type==='block_actions'&&p.actions?.[0]?.action_id===ACTION)||reschedulePress(p)||(p?.type==='view_submission'&&p.view?.callback_id===CALLBACK);}
 function isAdmin(p){return (p.team?.id||p.team_id)==='T086X85G14N'&&ADMINS.includes(p.user?.id);}
@@ -294,10 +298,11 @@ async function closeAlerts(call,done,options={},skipTs=''){
 // (the same Reschedule request the Job Board sends); today leaves it in Please Assign.
 async function routeCard(p,meta,when,options={}){
  const today=pacific(options.now||Date.now()).date;
- if(!when.noDate&&when.date<=today&&meta.channel!==FUTURE)return meta.channel===ASSIGN?'It is for today, so the card stays in Please Assign.':'';
- if(![ASSIGN,FUTURE].includes(meta.channel))return 'The card is not in Please Assign or Future Calls, so it was left where it is. Use Reschedule on it if needed.';
+ const lead=PLUMBER[meta.channel]||null;
+ if(!when.noDate&&when.date<=today&&meta.channel!==FUTURE)return meta.channel===ASSIGN?'It is for today, so the card stays in Please Assign.':lead?'It is for today, so the card stays with the plumber.':'';
+ if(![ASSIGN,FUTURE].includes(meta.channel)&&!lead)return 'The card is not in Please Assign, Future Calls or a plumber channel, so it was left where it is. Use Reschedule on it if needed.';
  if(!/^Rec[A-Za-z0-9]+$/.test(meta.recordId||'')||!/^\d{10}\.\d{6}$/.test(meta.incomingTs||''))return 'The card could not be matched to its call, so it was left in Please Assign. Use Reschedule on it.';
- const request={requestId:randomUUID(),actor:p.user.id,operation:'reschedule',jobNumber:meta.invoice,recordId:meta.recordId,incomingTs:meta.incomingTs,expectedLead:null,expectedHelper:null,target:null,schedule:when.noDate?{noDate:true}:{date:when.date,time:when.time}};
+ const request={requestId:randomUUID(),actor:p.user.id,operation:'reschedule',jobNumber:meta.invoice,recordId:meta.recordId,incomingTs:meta.incomingTs,expectedLead:lead,expectedHelper:null,target:null,schedule:when.noDate?{noDate:true}:{date:when.date,time:when.time}};
  const submit=options.submitAssignment||submitAssignment;
  try{
   let r=await submit(request,options.assignment||{});
@@ -306,4 +311,4 @@ async function routeCard(p,meta,when,options={}){
  }catch(e){return 'The card could not be moved to Future Calls ('+e.message+'). Use Reschedule on it.';}
 }
 
-module.exports={cardCall,rescheduleView,cardOnlyView,pendingText,RESCHEDULE,dropPast,findAssignCard,removeButton,closeAlerts,withScheduled,scheduleOnBlocks,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
+module.exports={CARD_CHANNELS,cardCall,rescheduleView,cardOnlyView,pendingText,RESCHEDULE,dropPast,findAssignCard,removeButton,closeAlerts,withScheduled,scheduleOnBlocks,ACTION,CALLBACK,intercepts,submissionError,route,routeCard,pickerView,ownTimeView,selectionOf,incomingTs,recordId,infoView,pacific};
