@@ -2,6 +2,32 @@
 const {validateAssignment}=require('./assignment-policy');
 const fingerprint=r=>JSON.stringify([r.actor,r.operation,r.recordId,r.incomingTs,r.expectedLead,r.expectedHelper,r.target,...(r.operation==='reschedule'?[r.schedule?.noDate===true?'none':[r.schedule?.date,r.schedule?.time]]:[])]);
 const RELEASE_AFTER_MS=2*60e3,GUARD_MS=65e3;
+// Latenode's global store stops answering about 30 s into a run, so a run that waits longer dies half-way and
+// leaves its lock behind (132251, 132300, 132346, 132357 on 11-06..11-13). Long waits are therefore never done
+// inside one run: the request is saved and a later run (the next status poll, or the next press on the call)
+// finishes it. RESUME_AFTER_MS: how old an unfinished request must be before another run may finish it.
+// STALE_AFTER_MS: an unfinished request older than this, that cannot be finished, no longer holds the call.
+const RESUME_AFTER_MS=12e3,STALE_AFTER_MS=10*60e3,INLINE_WAIT_MS=8e3;
+const unfinished=o=>!o||!['done','refused','failed'].includes(o.status);
+const others=(state,r)=>[...new Set([state.activeRequest,state.pendingAssignNow].filter(x=>x&&x!==r.requestId&&x!==r.parentAssignmentRequestId))];
+// Before refusing a press because another action holds the call, try to settle that action: finish a dispatched one
+// (verify only, never re-send), and release one that is older than STALE_AFTER_MS.
+async function settleOthers(r,ctx,state){
+ const now=ctx.now?ctx.now():Date.now();
+ const ids=others(state,r);if(!ids.length)return state;
+ for(const id of ids){
+  const o=await ctx.requests.get(id);
+  if(o?.request&&unfinished(o)&&state.dispatchStarted===id&&state.activeRequest===id&&now-(o.updatedAt||0)>=RESUME_AFTER_MS)
+   await handleAssignment(o.request,{...ctx,actor:o.request.actor}).catch(()=>{});
+ }
+ const s=await ctx.state.get(r.recordId)||{};
+ const left=others(s,r);if(!left.length)return s;
+ const stale=[];
+ for(const id of left){const o=await ctx.requests.get(id);if(!unfinished(o))continue;if(now-(o?.updatedAt||o?.startedAt||0)<STALE_AFTER_MS)return s;stale.push([id,o]);}
+ for(const[id,o]of stale)if(o)await ctx.requests.set(id,{...o,status:'refused',error:'This action stopped half-way and held the call for over 10 minutes, so it was released. The call was re-read before the next action.',staleReleased:true,updatedAt:now});
+ delete s.activeRequest;delete s.pendingAssignNow;delete s.dispatchStarted;delete s.effect;await ctx.state.set(r.recordId,s);
+ return s;
+}
 // True only when the call still matches the state the request was made from.
 function unchanged(r,c){
  if(c.stage==='completed')return false;
@@ -16,7 +42,7 @@ async function handleAssignment(r,ctx){
  const fp=fingerprint(r),old=await ctx.requests.get(r.requestId);
  if(old&&old.fingerprint!==fp)return refused('This request ID belongs to a different action.');
  if(old&&['done','refused'].includes(old.status))return old;
- const state=await ctx.state.get(r.recordId)||{};
+ const state=await settleOthers(r,ctx,await ctx.state.get(r.recordId)||{});
  if(state.pendingAssignNow&&state.pendingAssignNow!==r.requestId&&state.pendingAssignNow!==r.parentAssignmentRequestId)return refused('An earlier assignment still needs verification. Use Check and resume.');
  if(state.activeRequest&&state.activeRequest!==r.requestId)return refused('Another action is still being verified for this call. Refresh shortly.');
  const now=()=>ctx.now?ctx.now():Date.now();
@@ -71,8 +97,10 @@ async function handleAssignment(r,ctx){
    if(ctx.prepareDispatch)await ctx.prepareDispatch(r,c);
    // Call Route ignores a second assignment press on the same call within 60 s (its assign guard), which
    // left 132333 locked on 11-10. Wait that window out instead of sending a change Call Route will drop.
+   // A short wait happens inline; a longer one is saved and finished by a later run (see RESUME_AFTER_MS).
    const wait=state.lastDispatchAt?state.lastDispatchAt+GUARD_MS-now():0;
-   if(wait>0&&ctx.sleep)await ctx.sleep(Math.min(wait,GUARD_MS));
+   if(wait>INLINE_WAIT_MS)return save({status:'working',waitUntil:now()+wait,error:'Waiting for the previous change on this call to settle. It continues by itself; refresh in a minute.'});
+   if(wait>0&&ctx.sleep)await ctx.sleep(wait);
    state.dispatchStarted=r.requestId;state.lastDispatchAt=now();await ctx.state.set(r.recordId,state);
    let dispatchError;
    try{await ctx.dispatch(r,c,state);}catch(e){dispatchError=e;}
@@ -89,4 +117,4 @@ async function handleAssignment(r,ctx){
   return save({status:'uncertain',error:'This action needs verification before retrying. Its records were retained.'});
  }
 }
-module.exports={handleAssignment,fingerprint};
+module.exports={handleAssignment,fingerprint,RESUME_AFTER_MS};

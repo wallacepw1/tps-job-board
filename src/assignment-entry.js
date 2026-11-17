@@ -1,7 +1,7 @@
 'use strict';
 const {timingSafeEqual}=require('node:crypto');
 const {createRuntime}=require('./assignment-runtime');
-const {handleAssignment,fingerprint}=require('./assignment-worker');
+const {handleAssignment,fingerprint,RESUME_AFTER_MS}=require('./assignment-worker');
 const {assignWithNow,pendingAssignment}=require('./assign-now');
 const {assignmentModal,decodeDraft}=require('./assignment');
 const {ADMINS,TECHS}=require('./assignment-policy');
@@ -16,6 +16,12 @@ async function handleEnvelope(e,options){
   const value=await options.store.getGlobalVariable('TPS_ASSIGN_REQUEST_'+r.requestId);const saved=typeof value==='string'?JSON.parse(value):value;
   if(!saved)return{status:'queued'};
   if(saved.fingerprint!==fingerprint(r))return{status:'refused',error:'This result belongs to another request.'};
+  // A request left unfinished (its run waited out a guard, or stopped before verifying) is finished here, in a
+  // fresh run. Dispatched requests are only verified, never sent again.
+  const t=options.now?options.now():Date.now();
+  if(options.enabled===true&&saved.request&&['working','uncertain'].includes(saved.status)&&t-(saved.updatedAt||0)>=RESUME_AFTER_MS&&(!saved.waitUntil||t>=saved.waitUntil)){
+   try{const ctx=createRuntime({...options,actor:saved.request.actor});const done=await assignWithNow(saved.request,ctx,options);if(done?.updatedAt){const {fingerprint:f2,request:r2,...out}=done;return out;}}catch{} // an unsaved refusal (call unreadable right now) leaves the saved state as it was
+  }
   const {fingerprint:privateFingerprint,request:privateRequest,...result}=saved;return result;
  }
  if(e.mode==='pending')return pendingAssignment(e.request||{},options.store);

@@ -33,6 +33,8 @@ async function assignWithNow(r,ctx,options,run=handleAssignment){
  state.pendingAssignNow=r.requestId;await ctx.state.set(r.recordId,state);
  let scheduled;try{scheduled=await run(phase.request,ctx);}catch{return save({status:'uncertain',error:'The move to today is not yet verified. Check the Job Board before retrying.'});}
  if(scheduled.status!=='done'){const result=await save({status:scheduled.status==='refused'?'refused':'uncertain',error:scheduled.error||'The move to today is not yet verified. The plumber was not assigned. Check the Job Board before retrying.'});if(result.status==='refused')await clearParent(r,ctx);return result;}
+ // Step 1 just touched the call; Call Route's 60 s guard only counts plumber-assign presses, so step 2 need not wait.
+ {const s2=await ctx.state.get(r.recordId)||{};if(s2.lastDispatchAt){delete s2.lastDispatchAt;await ctx.state.set(r.recordId,s2);}}
  let result;try{result=await run(r,ctx);}catch{return save({status:'uncertain',error:'The schedule is saved, but assignment is not yet verified. Use Check and resume.'});}if(['done','refused'].includes(result.status))await clearParent(r,ctx);return result;
 }
 async function pendingAssignment(r,store){

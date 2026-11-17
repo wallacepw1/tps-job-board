@@ -6,3 +6,10 @@ test('dispatch stores a single-use canonical payload capability, never a supplie
 test('runtime refuses unsupported Slack binary URLs',async()=>{const f=fx();await assert.rejects(()=>f.ctx.files.read({url_private_download:'https://evil.example/file'}));});
 
 test('reschedule dispatch uses canonical call and the existing date/time picker contract',async()=>{for(const schedule of [{date:'2026-10-29',time:'10:30'},{noDate:true}]){const f=fx(),c=await f.ctx.loadCall(f.r);await f.ctx.prepareDispatch(f.r,c);await f.ctx.dispatch({...f.r,operation:'reschedule',target:null,schedule},c);const cap=JSON.parse(f.db.get('TPS_ASSIGN_DISPATCH_'+f.r.requestId));assert.equal(cap.payload.actions[0].action_id,schedule.noDate?'schedule_later':'schedule_call');if(!schedule.noDate){assert.equal(cap.payload.state.values.schedule_pickers.schedule_date.selected_date,schedule.date);assert.equal(cap.payload.state.values.schedule_pickers.schedule_time.selected_time,schedule.time);}assert.equal(cap.payload.message.text.startsWith('132999'),true);}});
+
+test('dispatch stops listening after a short wait: a slow Call Route is not an error, a real failure still is',async()=>{const {createRuntime}=require('../src/assignment-runtime');const db=new Map();const store={getGlobalVariable:async k=>db.get(k),setGlobalVariable:async(k,v)=>db.set(k,v)};
+ const c={source:{channel:'C0C2XB4VD1N',ts:'1.1'},dispatchMessage:{blocks:[]}};const r={requestId:'request-123456789',actor:'U0876C3TEGL',operation:'reschedule',target:null,schedule:{noDate:true}};
+ const slow=createRuntime({store,slack:async()=>({ok:true}),key:'k',actor:r.actor,fetch:async()=>{const e=Error('timed out');e.name='TimeoutError';throw e}});
+ await slow.dispatch(r,c);assert.equal(JSON.parse(db.get('TPS_ASSIGN_DISPATCH_'+r.requestId)).used,false);
+ const broken=createRuntime({store,slack:async()=>({ok:true}),key:'k',actor:r.actor,fetch:async()=>{throw Error('ECONNREFUSED')}});
+ db.clear();await assert.rejects(broken.dispatch(r,c),/ECONNREFUSED/)});
