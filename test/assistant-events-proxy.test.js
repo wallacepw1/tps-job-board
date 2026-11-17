@@ -51,3 +51,13 @@ test('Schedule this call pressed in the Assistant messages opens the pop-up with
  assert.equal(sent.find(x=>x.url.endsWith('views.open')).auth,'Bearer xoxb-assistant');assert.equal(sent.find(x=>x.url.endsWith('views.update')).auth,'Bearer xoxb-assistant');
  assert.equal(sent.find(x=>x.url.includes('conversations.history')).auth,'Bearer xoxb-bot');assert.equal(sent.some(x=>x.url.includes('media-bot-slack-events')),false);
 });
+
+test('a slow Latenode answer on a form submit closes the form on Working instead of a Slack connection error',async()=>{
+ const routes={},secret='fixture-signing';let calls=0,out;
+ registerAssistantEventsProxy({router:{post:(p,h)=>routes[p]=h,get:()=>{}}},{secret,fetch:async()=>{calls++;const e=new Error('timeout');e.name='TimeoutError';throw e;}});
+ const payload={type:'view_submission',view:{id:'V1',callback_id:'tps_invoice'}},raw=new URLSearchParams({payload:JSON.stringify(payload)}).toString(),ts=String(Math.floor(Date.now()/1000));
+ const headers={'x-slack-request-timestamp':ts,'x-slack-signature':'v0='+createHmac('sha256',secret).update('v0:'+ts+':'+raw).digest('hex')};
+ const res={headersSent:false,status(n){this.code=n;return this;},json(b){out=b;return this;},send(b){out=b;return this;},type(){return this;}};
+ await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);
+ assert.equal(calls,1);assert.equal(res.code,200);assert.equal(out.response_action,'update');assert.equal(out.view.callback_id,'tps_tool_result');
+});

@@ -4,6 +4,7 @@ const {assistantMeldRequest}=require('./assistant-meld-relay');
 const {handlePhone}=require('./phone-admin');
 const {handlePriceSearch,publicStatus}=require('./price-search');
 const appfolioSchedule=require('./appfolio-schedule');
+const WORKING={response_action:'update',view:{type:'modal',callback_id:'tps_tool_result',title:{type:'plain_text',text:'TPS Assistant',emoji:true},close:{type:'plain_text',text:'Close',emoji:true},blocks:[{type:'section',text:{type:'mrkdwn',text:'Working… This window will update when the result is ready. Please do not submit again.'}}]}};
 const TARGET='https://webhook.latenode.com/27333/prod/media-bot-slack-events';
 function parseAssistantBody(raw){
  try{return JSON.parse(raw);}catch{
@@ -58,7 +59,14 @@ function registerAssistantEventsProxy(receiver,options={}){
    }
    if(!shouldForwardAssistant(body))return res.status(200).send('');
    // Await delivery so Slack retries transport failures rather than losing a click.
-   const response=await (options.fetch||global.fetch)(TARGET,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(2200)});
+   let response;
+   try{response=await (options.fetch||global.fetch)(TARGET,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(2200)});}
+   catch(e){
+    // Latenode was slow to answer (it usually still runs the submission). A 502 here makes Slack show
+    // "We had some trouble connecting" and invites a second submit, so close the form on a Working window instead.
+    if(body.type==='view_submission'){console.error('assistant relay slow, acked submission',e.name);return res.status(200).json(WORKING);}
+    throw e;
+   }
    res.status(response.status).type('application/json').send(await response.text());
   }catch{if(!res.headersSent)res.status(502).send('Assistant could not be reached.');}
  });
