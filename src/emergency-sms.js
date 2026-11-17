@@ -31,7 +31,11 @@ function acknowledgment(route, acceptedBy) {
   const attribution=/^[\p{L}\p{M}][\p{L}\p{M} .’'-]{0,49}$/u.test(name)?' by '+name:'';
   return 'TPS Plumbing Inc: Your emergency message has been accepted'+attribution+'. You will be contacted if necessary. Office may reply by txt. Thank you for using TPS Emergency Services.'+footer;
 }
-async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now()) {
+const pause = ms => new Promise(r => setTimeout(r, ms));
+// Phone.com can take a few seconds to list a text it just delivered. The daytime ER path reaches
+// Render within ~2 s of the text, so the first lookup can miss it (11-17 test: inbound_unverified).
+const LOOKUP_DELAYS = [0, 3000, 4000, 5000];
+async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now(), { delays = LOOKUP_DELAYS, sleep = pause } = {}) {
   const {eventId, recipient, route, issuedAt, inboundHash, inboundAt, replyId, acceptedBy} = input || {};
   const manual=route==='staff_reply', reply=typeof input?.text==='string'?input.text.trim():'';
   if(manual&&(!reply||reply.length>1200||!/^[A-Za-z0-9_-]{6,80}$/.test(replyId||'')))return {status:'invalid'};
@@ -41,18 +45,23 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
       !Number.isFinite(issuedAt) || Math.abs(now-issuedAt)>120000) return {status:'invalid'};
   const account = await phone.accountId();
   const path = '/accounts/'+encodeURIComponent(account)+'/messages';
-  const history = await phone.request(path, {
-    limit:500,'sort[id]':'desc','filters[direction]':'in','filters[from]':recipient,'filters[to]':OFFICE
-  });
-  if (!Array.isArray(history.items)) return {status:'history_unavailable'};
-  const rows = history.items;
-  const bound=rows.filter(row=>number(row.from)===recipient &&
-    (Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE));
-  const exact=bound.find(row=>ids(row).includes(eventId));
   const verifiedFingerprint=/^[a-f0-9]{64}$/.test(inboundHash||'')&&Number.isFinite(inboundAt)&&inboundAt>0;
-  const matching=verifiedFingerprint?bound.filter(row=>fingerprint(row)===inboundHash &&
-    Math.abs(messageTime(row.created_at)-inboundAt)<=120000):[];
-  const original=exact||(matching.length===1?matching[0]:null);
+  let history, rows, matching=[], original=null;
+  for (let i=0; i<delays.length && !original; i++) {
+    if (delays[i]) await sleep(delays[i]);
+    history = await phone.request(path, {
+      limit:500,'sort[id]':'desc','filters[direction]':'in','filters[from]':recipient,'filters[to]':OFFICE
+    });
+    if (!Array.isArray(history.items)) return {status:'history_unavailable'};
+    rows = history.items;
+    const bound=rows.filter(row=>number(row.from)===recipient &&
+      (Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE));
+    const exact=bound.find(row=>ids(row).includes(eventId));
+    matching=verifiedFingerprint?bound.filter(row=>fingerprint(row)===inboundHash &&
+      Math.abs(messageTime(row.created_at)-inboundAt)<=120000):[];
+    original=exact||(matching.length===1?matching[0]:null);
+    if (input.diagnostic === true) break;
+  }
   if (input.diagnostic === true) return {
     status:'diagnostic',count:rows.length,fields:Object.keys(rows[0]||{}),
     matchingId:rows.some(row=>ids(row).includes(eventId)),
@@ -68,30 +77,61 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now())
   await send(path,{from:OFFICE,to:[recipient],text:manual?'TPS Plumbing Inc: '+reply+' Reply STOP to opt out or HELP for help.':acknowledgment(route,acceptedBy),tag:manual?'tps-staff-'+replyId:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
   return {status:'accepted'};
 }
+// Daytime ER texts are rare, so Paul and Edgar also get a text on their own phones (Paul 2026-11-17).
+// Numbers come from TPS_ER_ALERT_NUMBERS on Render (comma separated), never from the request.
+const pretty = p => p.replace(/^\+1(\d{3})(\d{3})(\d{4})$/,'($1) $2-$3');
+function staffAlertNumbers(value = process.env.TPS_ER_ALERT_NUMBERS) {
+  return [...new Set(String(value||'').split(',').map(number).filter(n=>/^\+1\d{10}$/.test(n) && n!==OFFICE))];
+}
+async function sendStaffAlert(input, send, path, { now = Date.now(), numbers = staffAlertNumbers() } = {}) {
+  const {eventId, from, excerpt, issuedAt} = input || {};
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(eventId || '') || !/^\+1\d{10}$/.test(from || '') ||
+      typeof excerpt !== 'string' || !Number.isFinite(issuedAt) || Math.abs(now-issuedAt)>120000) return {status:'invalid'};
+  if (!numbers.length) return {status:'no_numbers'};
+  const body = excerpt.replace(/\s+/g,' ').trim().slice(0,300);
+  const text = 'TPS ALERT: Emergency text from '+pretty(from)+': "'+body+'" Open the TPS Assistant in Slack and press Accept so the customer gets a confirmation.';
+  const results = await Promise.allSettled(numbers.map(to => send(path, {from:OFFICE,to:[to],text,tag:'tps-er-staff-'+eventId})));
+  const sent = results.filter(r=>r.status==='fulfilled').length;
+  return {status: sent===numbers.length ? 'accepted' : sent ? 'partial' : 'unconfirmed', sent, of: numbers.length};
+}
+async function readSigned(req, res, options) {
+  let raw=req.rawBody?.toString() || '';
+  if (!raw) for await(const chunk of req) {
+    raw+=chunk.toString();
+    if(Buffer.byteLength(raw)>4096){res.status(413).json({status:'too_large'});return null;}
+  }
+  if(Buffer.byteLength(raw)>4096){res.status(413).json({status:'too_large'});return null;}
+  if(!validSignature(raw,req.headers['x-tps-signature'],options.secret || process.env.TPS_INTERNAL_KEY)){
+    res.status(401).json({status:'unauthorized'});return null;}
+  try{return JSON.parse(raw);}catch{res.status(400).json({status:'invalid'});return null;}
+}
+function phoneSender(options) {
+  const token=process.env.PHONECOM_API_TOKEN;
+  return options.send || (async(path,body)=>{
+    // A timeout can mean the provider accepted the message. Never retry a POST here.
+    const r=await fetch('https://api.phone.com/v4'+path,{method:'POST',
+      headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify(body),signal:AbortSignal.timeout(12000),redirect:'error'});
+    if(r.status!==201)throw Error('Phone.com send was not accepted');
+  });
+}
 function registerEmergencySms(receiver, options={}) {
   receiver.router.post('/internal/phone/emergency-ack', async(req,res)=>{
     try {
-      let raw=req.rawBody?.toString() || '';
-      if (!raw) for await(const chunk of req) {
-        raw+=chunk.toString();
-        if(Buffer.byteLength(raw)>4096)return res.status(413).json({status:'too_large'});
-      }
-      if(Buffer.byteLength(raw)>4096)return res.status(413).json({status:'too_large'});
-      if(!validSignature(raw,req.headers['x-tps-signature'],options.secret || process.env.TPS_INTERNAL_KEY))
-        return res.status(401).json({status:'unauthorized'});
-      let input;
-      try{input=JSON.parse(raw);}catch{return res.status(400).json({status:'invalid'});}
+      const input=await readSigned(req,res,options);
+      if(!input)return;
       const phone=options.phone || createPhoneCom();
-      const token=process.env.PHONECOM_API_TOKEN;
-      const send=options.send || (async(path,body)=>{
-        // A timeout can mean the provider accepted the message. Never retry a POST here.
-        const r=await fetch('https://api.phone.com/v4'+path,{method:'POST',
-          headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-          body:JSON.stringify(body),signal:AbortSignal.timeout(12000),redirect:'error'});
-        if(r.status!==201)throw Error('Phone.com send was not accepted');
-      });
-      return res.json(await sendEmergencyAcknowledgment(input,phone,send));
+      return res.json(await sendEmergencyAcknowledgment(input,phone,phoneSender(options)));
+    }catch{return res.status(502).json({status:'unconfirmed'});}
+  });
+  receiver.router.post('/internal/phone/office-er-alert', async(req,res)=>{
+    try {
+      const input=await readSigned(req,res,options);
+      if(!input)return;
+      const phone=options.phone || createPhoneCom();
+      const path='/accounts/'+encodeURIComponent(await phone.accountId())+'/messages';
+      return res.json(await sendStaffAlert(input,phoneSender(options),path,options.numbers?{numbers:options.numbers}:{}));
     }catch{return res.status(502).json({status:'unconfirmed'});}
   });
 }
-module.exports={registerEmergencySms,sendEmergencyAcknowledgment,validSignature};
+module.exports={registerEmergencySms,sendEmergencyAcknowledgment,sendStaffAlert,staffAlertNumbers,validSignature};
