@@ -14,6 +14,14 @@ test('filters channel posts and deletions while retaining recall replies and edi
  assert.equal(shouldForwardAssistant(event({type:'app_home_opened',tab:'messages'})),false);
  assert.equal(shouldForwardAssistant(event({type:'app_home_opened',tab:'home'})),true);
 });
+test('drops the bot\'s own text-only thread posts but keeps bot files and people',()=>{
+ const note={type:'message',subtype:'bot_message',channel:'C0C5VVDCQ92',bot_id:'B0C4ZGXJGLV',thread_ts:'1794609348.843949',text:'Price: Ok'};
+ assert.equal(shouldForwardAssistant(event(note)),false);
+ assert.equal(shouldForwardAssistant(event({type:'message',channel:'C0C19TG3KJ6',bot_id:'B0C4ZGXJGLV',user:'U0C52NTH4LW',thread_ts:'1793827003.181319',text:'Pricing card record: 132283'})),false);
+ assert.equal(shouldForwardAssistant(event({type:'message',subtype:'message_changed',channel:'C1',message:{bot_id:'B0C4ZGXJGLV',thread_ts:'1.2',text:'edited note'}})),false);
+ assert.equal(shouldForwardAssistant(event({...note,files:[{id:'F1'}]})),true);
+ assert.equal(shouldForwardAssistant(event({type:'message',channel:'C1',user:'U1',thread_ts:'1.2',text:'late reply'})),true);
+});
 test('preserves interactive and slash payloads',()=>{
  for(const body of [{type:'block_actions',actions:[{value:'qb:menu'}]},{type:'view_submission',view:{callback_id:'tps_invoice'}},{command:'/tps',text:'payroll'}]){
   const raw=new URLSearchParams(body.command?body:{payload:JSON.stringify(body)}).toString();

@@ -20,8 +20,10 @@ function shouldForwardAssistant(body){
  if(event.subtype==='message_deleted')return false;
  const message=event.subtype==='message_changed'?event.message:event;
  if(!message)return false;
- // Late photos and edits can belong to a recall; keep every threaded event.
- if(message.thread_ts)return true;
+ // Late photos and edits can belong to a recall; keep threaded events from people and any post with files.
+ // A bot's own text-only thread posts (TPS Bot price notes, pricing card records, status replies) are never
+ // handled by the Assistant, and a pricing session sends hundreds of them, so they stop here (2026-11-18).
+ if(message.thread_ts)return !((message.bot_id||message.bot_profile||message.subtype==='bot_message')&&!message.files?.length);
  if(event.subtype==='message_changed'||message.bot_id||message.bot_profile)return false;
  return event.channel_type==='im'||String(event.channel||'').startsWith('D');
 }
