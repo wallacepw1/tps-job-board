@@ -34,7 +34,12 @@ function acknowledgment(route, acceptedBy) {
 const pause = ms => new Promise(r => setTimeout(r, ms));
 // Phone.com can take a few seconds to list a text it just delivered. The daytime ER path reaches
 // Render within ~2 s of the text, so the first lookup can miss it (11-17 test: inbound_unverified).
-const LOOKUP_DELAYS = [0, 3000, 4000, 5000];
+const LOOKUP_DELAYS = [0, 3000];
+// Since ~11-13 Phone.com no longer lists inbound texts in its messages API (11-18 check: the
+// 11-17 ER test texts return 404), so history can't prove the text. When it isn't listed, trust the
+// signed Latenode request instead, within these windows, once per text and route.
+const TRUST_WINDOW = {office_emergency:15*60000, emergency:15*60000, emergency_accepted:24*3600000};
+const sentOnce = new Map();
 async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now(), { delays = LOOKUP_DELAYS, sleep = pause } = {}) {
   const {eventId, recipient, route, issuedAt, inboundHash, inboundAt, replyId, acceptedBy} = input || {};
   const manual=route==='staff_reply', reply=typeof input?.text==='string'?input.text.trim():'';
@@ -69,13 +74,23 @@ async function sendEmergencyAcknowledgment(input, phone, send, now = Date.now(),
     matchingOffice:rows.some(row=>(Array.isArray(row.to)?row.to:[row.to]).some(v=>number(v)===OFFICE)),
     emergencyFound:rows.some(row=>isEmergency(messageText(row))),fingerprintMatches:matching.length,templateVersion:2
   };
-  if (!original || (!manual&&!isEmergency(messageText(original))) ||
+  let trusted = false;
+  if (!original) {
+    const windowMs = TRUST_WINDOW[route];
+    const recent = windowMs && Number.isFinite(inboundAt) && inboundAt>0 && now-inboundAt>=-60000 && now-inboundAt<=windowMs;
+    if (!manual && !recent) return {status:'inbound_unverified'};
+    trusted = true;
+  } else if ((!manual&&!isEmergency(messageText(original))) ||
       /^\s*reminder:\s*work order\b/i.test(messageText(original))) return {status:'inbound_unverified'};
+  const onceKey = manual ? 'staff:'+replyId : route+':'+eventId;
+  for (const [k,t] of sentOnce) if (now-t>48*3600000) sentOnce.delete(k);
+  if (sentOnce.has(onceKey)) return {status:'duplicate'};
   const keyword = rows.map(messageText).find(text=>STOP.test(text)||START.test(text));
   if (STOP.test(keyword || '')) return {status:'opted_out'};
   if (!keyword && (rows.length>=500 || Number(history.total)>rows.length)) return {status:'consent_history_incomplete'};
+  sentOnce.set(onceKey, now);
   await send(path,{from:OFFICE,to:[recipient],text:manual?'TPS Plumbing Inc: '+reply+' Reply STOP to opt out or HELP for help.':acknowledgment(route,acceptedBy),tag:manual?'tps-staff-'+replyId:(route==='emergency_accepted'?'tps-er-accepted-':'tps-er-')+eventId});
-  return {status:'accepted'};
+  return {status:'accepted',...(trusted?{verifiedBy:'signature'}:{})};
 }
 // Daytime ER texts are rare, so Paul and Edgar also get a text on their own phones (Paul 2026-11-17).
 // Numbers come from TPS_ER_ALERT_NUMBERS on Render (comma separated), never from the request.
