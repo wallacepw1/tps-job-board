@@ -1,7 +1,9 @@
 'use strict';
 // Read-only "where do calls go now" view for TPS admins: Phone.com routing next to the On call calendar.
 const { createPhoneCom } = require('./phonecom');
-const { readOnCall } = require('./oncall-calendar');
+const { readOnCall, onCallPeople } = require('./oncall-calendar');
+const { currentMode } = require('./office-mode');
+const { writerReady } = require('./oncall-writer');
 
 const TZ = process.env.TZ_NAME || 'America/Los_Angeles';
 const ONCALL_MENU = process.env.PHONECOM_ONCALL_MENU || 'On Call Plumber';
@@ -78,14 +80,15 @@ const section = text => ({ type: 'section', text: { type: 'mrkdwn', text: text.l
 function statusBlocks(snap) {
   const blocks = [{ type: 'header', text: { type: 'plain_text', text: '📞 Phone settings' } }];
   const cal = snap.calendar;
-  const want = cal?.connected ? cal.current.map(s => s.person || s.title) : null;
+  const want = cal?.connected ? (cal.people || onCallPeople(cal.current.map(s => ({ kind: 'shift', ...s })))).slice() : null;
+  if (want && !want.length && cal.current.length) want.push(...cal.current.map(s => s.title));
   const have = snap.phone.onCall;
 
   // On call: calendar vs Phone.com.
   let oncall = '*On call right now*\n';
   if (!cal) oncall += '• Calendar: couldn’t be read (see below)\n';
   else if (!cal.connected) oncall += '• Calendar: not connected yet (ONCALL_CALENDAR_ICS_URL is not set)\n';
-  else oncall += `• Calendar says: *${want.join(' + ') || 'nobody'}*${cal.current[0] ? ` until ${fmtWhen(cal.current[0].end)}` : ''}\n`;
+  else { const shift = cal.current.find(s => s.person === want[0] && s.oneOff) || cal.current.find(s => s.person === want[0]) || cal.current[0]; oncall += `• Calendar says: *${want.join(' + ') || 'nobody'}*${shift ? ` until ${fmtWhen(shift.end)}${shift.oneOff ? ' (swap)' : ''}` : ''}\n`; }
   if (!snap.phone.ready) oncall += '• Phone.com: not connected yet (PHONECOM_API_TOKEN is not set)\n';
   else if (!snap.phone.menu) oncall += `• Phone.com: couldn’t find the “${ONCALL_MENU}” menu\n`;
   else oncall += `• Phone.com “${ONCALL_MENU}” sends unanswered calls to: *${have?.label || 'nothing set'}*\n`;
@@ -95,6 +98,25 @@ function statusBlocks(snap) {
   }
   blocks.push(section(oncall));
   if (cal?.connected && cal.upcoming.length) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'Next: ' + cal.upcoming.slice(0, 5).map(s => `${s.person || s.title} ${fmtWhen(s.start)}`).join(' · ') }] });
+
+  // Office phones: holiday mode and Paul's days off.
+  const now = currentMode(snap.phone.numbers);
+  let office = '*Office phones*\n';
+  office += now.kind === 'holiday' ? '• Now: 🎉 *Holiday mode*, office calls go straight to the on-call plumber\n' : now.kind === 'dayoff' ? `• Now: 🏖️ *Paul off*, calls that ring Paul ring *${now.cover}*\n` : snap.phone.numbers ? '• Now: normal office routing\n' : '';
+  for (const s of cal?.special || []) office += `• Calendar today: “${s.title}” until ${fmtWhen(s.end)}\n`;
+  blocks.push(section(office.trim()));
+  const coming = (cal?.upcomingSpecial || []).slice(0, 8);
+  const active = (cal?.special || []).concat((cal?.current || []).filter(s => s.oneOff));
+  for (const s of [...active, ...coming]) {
+    const text = `${s.kind === 'holiday' ? '🎉' : s.kind === 'dayoff' ? '🏖️' : '🔁'} *${s.title}*  ${fmtWhen(s.start)} → ${fmtWhen(s.end)}`;
+    blocks.push(s.tool && s.id ? { ...section(text), accessory: { type: 'button', action_id: 'tps_phone_remove', text: { type: 'plain_text', text: 'Remove' }, value: String(s.id).slice(0, 2000), confirm: { title: { type: 'plain_text', text: 'Remove this?' }, text: { type: 'mrkdwn', text: `Remove “${s.title}” from the On call calendar? Phones follow the calendar again within a minute.` }, confirm: { type: 'plain_text', text: 'Remove' }, deny: { type: 'plain_text', text: 'Keep' } } } } : section(text + '  _(edit in Google Calendar)_'));
+  }
+  blocks.push({ type: 'actions', elements: [
+    { type: 'button', action_id: 'tps_phone_swap', text: { type: 'plain_text', text: '🔁 Swap on call' }, value: 'swap' },
+    { type: 'button', action_id: 'tps_phone_holiday', text: { type: 'plain_text', text: '🎉 Holiday' }, value: 'holiday' },
+    { type: 'button', action_id: 'tps_phone_dayoff', text: { type: 'plain_text', text: '🏖️ Paul day off' }, value: 'dayoff' },
+  ] });
+  if (!writerReady()) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'Calendar writing isn’t set up yet, so these buttons tell you what to add in Google Calendar yourself. Phones follow the calendar either way.' }] });
 
   // Office numbers and their routing rules.
   if (snap.phone.numbers?.length) {
@@ -111,9 +133,11 @@ function statusBlocks(snap) {
   const syncBits = [`Automatic on-call switching: *${sync.mode}*`];
   if (sync.lastSwitch) syncBits.push(`last switch ${sync.lastSwitch.person} (from ${sync.lastSwitch.from}) ${fmtWhen(new Date(sync.lastSwitch.at))}`);
   if (sync.last?.action === 'error') syncBits.push(`⚠️ last check failed: ${sync.last.error}`);
+  if (sync.lastOffice) syncBits.push(`office phones set to ${sync.lastOffice.mode} ${fmtWhen(new Date(sync.lastOffice.at))}`);
+  if (sync.last?.office?.action === 'error') syncBits.push(`⚠️ office phone check failed: ${sync.last.office.error}`);
   if (sync.postError) syncBits.push(`⚠️ #office post failed: ${sync.postError}`);
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: syncBits.join(' · ') }] });
-  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Read only: nothing is changed in Phone.com. Checked ${fmtWhen(snap.at)}.` }] });
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Phones follow the On call calendar (checked every 5 minutes). Checked ${fmtWhen(snap.at)}.` }] });
   blocks.push({ type: 'actions', elements: [{ type: 'button', action_id: 'tps_phone_refresh', text: { type: 'plain_text', text: '🔄 Refresh' }, value: 'refresh' }] });
   return blocks;
 }
