@@ -27,7 +27,7 @@ require('./emergency-sms').registerEmergencySms(receiver);
 require('./price-bridge').registerPriceBridge(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
 receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:8}));
-receiver.router.get('/phone/health', (_req, res) => res.json({phonecom:!!process.env.PHONECOM_API_TOKEN,calendar:!!process.env.ONCALL_CALENDAR_ICS_URL,assistant:!!process.env.TPS_ASSISTANT_SIGNING_SECRET,popup:!!process.env.TPS_ASSISTANT_BOT_TOKEN,sync:onCallSync?.status()||null,version:3}));
+receiver.router.get('/phone/health', (_req, res) => res.json({phonecom:!!process.env.PHONECOM_API_TOKEN,calendar:!!process.env.ONCALL_CALENDAR_ICS_URL,assistant:!!process.env.TPS_ASSISTANT_SIGNING_SECRET,popup:!!process.env.TPS_ASSISTANT_BOT_TOKEN,calendarWrite:!!(process.env.ONCALL_CALENDAR_SCRIPT_URL&&process.env.ONCALL_CALENDAR_SCRIPT_KEY),sync:onCallSync?.status()||null,version:4}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });

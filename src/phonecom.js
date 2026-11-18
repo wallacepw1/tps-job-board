@@ -1,7 +1,7 @@
 'use strict';
 // Shared Phone.com API v4 client. One place for the token, the account lookup and rate limits,
 // so the phone settings tool now and the texting tools later use the same connection.
-// Reads by default. patch() is used only by the on-call sync in live mode (PHONECOM_SYNC_MODE=live).
+// Reads by default. patch()/create() are used only by the on-call sync in live mode (PHONECOM_SYNC_MODE=live).
 const BASE = 'https://api.phone.com/v4';
 
 class PhoneComError extends Error {
@@ -64,7 +64,12 @@ function createPhoneCom({ token = process.env.PHONECOM_API_TOKEN, fetch: fetcher
     return request(`/accounts/${id}/${resource}/${encodeURIComponent(itemId)}`, {}, { method: 'PATCH', body });
   }
 
-  return { ready: !!token, accountId, list, get, patch, request };
+  async function create(resource, body) {
+    const id = await accountId();
+    return request(`/accounts/${id}/${resource}`, {}, { method: 'POST', body });
+  }
+
+  return { ready: !!token, accountId, list, get, patch, create, request };
 }
 
 module.exports = { createPhoneCom, PhoneComError, BASE };

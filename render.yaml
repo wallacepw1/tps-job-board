@@ -45,5 +45,9 @@ services:
         sync: false
       - key: PHONECOM_SYNC_MODE
         value: report
+      - key: ONCALL_CALENDAR_SCRIPT_URL
+        sync: false
+      - key: ONCALL_CALENDAR_SCRIPT_KEY
+        sync: false
       - key: PUBLIC_URL
         value: https://tps-job-board.onrender.com

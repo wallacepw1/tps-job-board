@@ -73,7 +73,7 @@ test('status shows calendar vs Phone.com on-call and office routing', async () =
   assert.match(text, /They match/);
   assert.match(text, /\(503\) 555-0100/);
   assert.match(describeRoute(snap.phone.ctx.routes.get('50'), snap.phone.ctx), /During “Business Hours”: ring \(503\) 555-0111 \+ ext 507 Edgar \(rings 20s\)\n• Otherwise: menu “On Call Plumber”/);
-  assert.match(text, /Read only/);
+  assert.match(text, /follow the On call calendar/);
   const off = statusBlocks({ ...snap, calendar: { connected: true, current: [{ person: 'Cindy', end: new Date() }], upcoming: [] } });
   assert.match(JSON.stringify(off), /don’t match/);
 });
