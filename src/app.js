@@ -8,6 +8,7 @@ const { registerCallActionsProxy } = require('./call-actions-proxy');
 const { registerAssistantEventsProxy } = require('./assistant-events-proxy');
 const { registerJobFilesGallery, postJobFilesCard } = require('./job-files');
 const { registerHelperEvents } = require('./helper-events');
+const { registerLatenodePings } = require('./latenode-pings');
 const { registerRundownRefresh } = require('./rundown-refresh');
 const { summaryHome, registerSummarySurface } = require('./jobs-summary-surface');
 const {TECHS}=require('./assignment-policy');
@@ -70,6 +71,7 @@ async function rerender(body, client) {
 registerAssignmentHandlers(app, { store, refresh, publishHome, messageModal });
 registerDescriptionHandlers(app,{store});
 registerHelperEvents(app);
+registerLatenodePings(app);
 registerRundownRefresh(app);
 registerSummarySurface(app);
 
