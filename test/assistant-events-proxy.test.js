@@ -69,3 +69,13 @@ test('a slow Latenode answer on a form submit closes the form on Working instead
  await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);
  assert.equal(calls,1);assert.equal(res.code,200);assert.equal(out.response_action,'update');assert.equal(out.view.callback_id,'tps_tool_result');
 });
+test('new channel cards seen by the Assistant feed the Latenode pinger without being relayed',async()=>{
+ const routes={},secret='test-secret',seen=[];let calls=0;
+ registerAssistantEventsProxy({router:{post:(p,h)=>routes[p]=h,get:()=>{}}},{secret,onMessage:e=>seen.push(e),fetch:async()=>{calls++;return{status:200,text:async()=>''}}});
+ const card={type:'message',subtype:'bot_message',channel:'C0C19TG3KJ6',bot_id:'B1',ts:'1.2',text:'*132415*'};
+ const raw=JSON.stringify(event(card)),ts=String(Math.floor(Date.now()/1000));
+ const headers={'x-slack-request-timestamp':ts,'x-slack-signature':'v0='+createHmac('sha256',secret).update('v0:'+ts+':'+raw).digest('hex')};
+ const res={status(n){this.code=n;return this},send(){return this},type(){return this}};
+ await routes['/slack/assistant-events']({rawBody:Buffer.from(raw),headers},res);
+ assert.equal(res.code,200);assert.equal(calls,0);assert.deepEqual(seen,[card]);
+});

@@ -35,6 +35,8 @@ function registerAssistantEventsProxy(receiver,options={}){
    if(!verifySlackRequest(raw,req.headers,options.secret||process.env.TPS_ASSISTANT_SIGNING_SECRET))return res.status(401).send('Request could not be verified.');
    const body=parseAssistantBody(raw);
    if(body.type==='url_verification')return res.status(200).send(body.challenge);
+   // New cards seen by the TPS Assistant app also feed the Latenode event pings (Meld follow-up, Daily Jobs scan, Meld Complete).
+   if(body.type==='event_callback'&&body.event?.type==='message'){try{options.onMessage?.(body.event);}catch(e){console.error('assistant ping feed',e.message);}}
    // "Schedule this call" alert in the TPS Assistant messages: same AppFolio scheduling as the card button,
    // with this app's token for the pop-up and the alert. Never relayed to Latenode.
    if(appfolioSchedule.intercepts(body)){

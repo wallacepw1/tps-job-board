@@ -25,25 +25,31 @@ function targetsFor(event){
 }
 function createPinger({key=process.env.TPS_INTERNAL_KEY,fetch:fetcher=global.fetch,debounceMs=DEBOUNCE_MS,setTimer=setTimeout}={}){
  const pending=new Map();
+ const stats={keyReady:!!key,cards:0,sent:0,failed:0,last:null,lastError:null};
  const send=async name=>{
   pending.delete(name);
   if(!key)return;
   const t=TARGETS[name];
-  try{const r=await fetcher(BASE+t.path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,...t.body,source:'jobboard'}),signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('status '+r.status);}
-  catch(e){console.error('latenode ping',name,e.message);}
+  try{const r=await fetcher(BASE+t.path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,...t.body,source:'jobboard'}),signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('status '+r.status);stats.sent++;stats.last={name,at:new Date().toISOString()};}
+  catch(e){stats.failed++;stats.lastError={name,message:e.message,at:new Date().toISOString()};console.error('latenode ping',name,e.message);}
  };
- return function onMessage(event){
+ function onMessage(event){
   const names=targetsFor(event);
+  if(names.length)stats.cards++;
   for(const name of names){
    if(pending.has(name))continue;
    const timer=setTimer(()=>{send(name);},debounceMs);timer?.unref?.();
    pending.set(name,timer);
   }
   return names;
- };
+ }
+ onMessage.stats=stats;
+ return onMessage;
 }
+// Both Slack apps can deliver the same post (Job Board on /slack/events, TPS Assistant on /slack/assistant-events);
+// the debounce turns that into one ping. Pass a shared pinger as options.onMessage.
 function registerLatenodePings(app,options={}){
- const onMessage=createPinger(options);
+ const onMessage=options.onMessage||createPinger(options);
  app.event('message',async({event})=>{onMessage(event);});
  return onMessage;
 }
