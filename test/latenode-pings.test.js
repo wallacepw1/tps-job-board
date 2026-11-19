@@ -30,3 +30,12 @@ test('no key, no ping',async()=>{
  const ping=createPinger({key:'',fetch:async()=>{calls++;return{ok:true};},setTimer:f=>{fn=f;return{};}});
  ping(card('C0C2YDBHFFY'));await fn();assert.equal(calls,0);
 });
+test('one shared pinger sends one ping when both apps deliver the same card',async()=>{
+ const {createPinger}=require('../src/latenode-pings');
+ const timers=[],sent=[];
+ const ping=createPinger({key:'k',setTimer:f=>{timers.push(f);return{}},fetch:async(url)=>{sent.push(url);return{ok:true}}});
+ const card={type:'message',channel:'C0C2YDBHFFY',ts:'1.2',text:'done'};
+ ping(card);ping({...card});
+ assert.equal(timers.length,2);for(const f of timers)await f();
+ assert.equal(sent.length,2);assert.equal(ping.stats.cards,2);assert.equal(ping.stats.sent,2);
+});

@@ -8,7 +8,8 @@ const { registerCallActionsProxy } = require('./call-actions-proxy');
 const { registerAssistantEventsProxy } = require('./assistant-events-proxy');
 const { registerJobFilesGallery, postJobFilesCard } = require('./job-files');
 const { registerHelperEvents } = require('./helper-events');
-const { registerLatenodePings } = require('./latenode-pings');
+const { registerLatenodePings, createPinger } = require('./latenode-pings');
+const cardPinger = createPinger();
 const { registerRundownRefresh } = require('./rundown-refresh');
 const { summaryHome, registerSummarySurface } = require('./jobs-summary-surface');
 const {TECHS}=require('./assignment-policy');
@@ -23,11 +24,11 @@ const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_
 // The store is created below; the job files panel only reads it when a card is clicked.
 registerCallActionsProxy(receiver, { get store() { return store; } });
 registerJobFilesGallery(receiver);
-registerAssistantEventsProxy(receiver);
+registerAssistantEventsProxy(receiver, { onMessage: cardPinger });
 require('./emergency-sms').registerEmergencySms(receiver);
 require('./price-bridge').registerPriceBridge(receiver);
 receiver.router.get('/healthz', (_req, res) => res.send('ok'));
-receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:8}));
+receiver.router.get('/slack/jobs-summary/health', (_req, res) => res.json({ready:!!process.env.TPS_INTERNAL_KEY,version:9,pings:cardPinger.stats}));
 receiver.router.get('/phone/health', (_req, res) => res.json({phonecom:!!process.env.PHONECOM_API_TOKEN,calendar:!!process.env.ONCALL_CALENDAR_ICS_URL,assistant:!!process.env.TPS_ASSISTANT_SIGNING_SECRET,popup:!!process.env.TPS_ASSISTANT_BOT_TOKEN,calendarWrite:!!(process.env.ONCALL_CALENDAR_SCRIPT_URL&&process.env.ONCALL_CALENDAR_SCRIPT_KEY),sync:onCallSync?.status()||null,version:4}));
 receiver.router.get('/status', (_req, res) => res.json(store.stats || { status: 'not refreshed yet' }));
 
@@ -71,7 +72,7 @@ async function rerender(body, client) {
 registerAssignmentHandlers(app, { store, refresh, publishHome, messageModal });
 registerDescriptionHandlers(app,{store});
 registerHelperEvents(app);
-registerLatenodePings(app);
+registerLatenodePings(app, { onMessage: cardPinger });
 registerRundownRefresh(app);
 registerSummarySurface(app);
 
