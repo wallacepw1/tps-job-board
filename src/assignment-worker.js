@@ -32,6 +32,8 @@ async function settleOthers(r,ctx,state){
 function unchanged(r,c){
  if(c.stage==='completed')return false;
  if(r.operation==='assign')return!c.lead&&c.stage==='unassigned';
+ // The move-to-today step of a Future assign has no lead: the call is untouched while it is still unassigned.
+ if(r.operation==='reschedule'&&r.parentAssignmentRequestId&&!r.expectedLead)return!c.lead&&c.stage==='unassigned';
  if(['reassign','reschedule','lead_complete'].includes(r.operation))return!!r.expectedLead&&c.lead===r.expectedLead&&c.stage==='plumber';
  return false;
 }
