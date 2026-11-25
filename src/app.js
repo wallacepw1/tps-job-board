@@ -75,6 +75,8 @@ registerHelperEvents(app);
 registerLatenodePings(app, { onMessage: cardPinger });
 registerRundownRefresh(app);
 registerSummarySurface(app);
+const { registerPlumberTotals, openTotals } = require('./plumber-totals');
+registerPlumberTotals(app);
 
 app.event('app_home_opened', async ({ event, client }) => {
   if (event.tab !== 'home') return;
@@ -198,6 +200,8 @@ app.event('message',async({event})=>{if(!watchedChannels.has(event.channel))retu
 app.command('/jobs', async ({ ack, command, client }) => {
   await ack();
   const arg = command.text.trim();
+  // "/jobs totals": admins see how much a plumber billed between two dates.
+  if (/^(totals?|earnings|pay)$/i.test(arg)) { await openTotals(client, command.trigger_id, command.user_id, false); return; }
   if (!store.updatedAt) await refresh();
   if (/^(me|mine|my)$/i.test(arg)) {
     const filters = { ...filtersFor(command.user_id), tab: 'mine', user: command.user_id };
