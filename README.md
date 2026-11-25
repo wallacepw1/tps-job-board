@@ -4,6 +4,7 @@ A Slack app that shows every TPS job in one place:
 
 - **Home tab**: click *TPS Job Board* in the Slack sidebar. Tabs for My jobs, Today, Tomorrow, This week, All open and Done, plus a tech filter.
 - **`/jobs`** in any channel opens the board; `/jobs 132174` opens one job; `/jobs eduardo` filters to a tech; `/jobs mine` shows your own jobs.
+- **Plumber totals** (admins only: Paul, Edgar, Thayned): the *💰 Plumber totals* button on the board, or `/jobs totals`. Pick a plumber (or all) and two dates to see the total billed and each priced call. It reads the Calls list: Assignee = plumber, Due Date = visit date, Price = the price submitted in #price-these/#closing. Completed calls that are not priced yet are listed separately and left out of the total.
 - **⚡ Shortcut** "Open job board" from the shortcuts menu.
 
 Each card shows the job #, client, address, issue, status, time and tech. Unassigned cards offer Thread, Files, Map, Assign and Reschedule. Assigned cards add Tech chat, Add videos/notes, Reassign, Reschedule and Add helper. Done cards offer Thread, Files and Completed. Assignment-changing controls are restricted to admins.

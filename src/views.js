@@ -221,6 +221,7 @@ function boardBlocks(store, filters) {
     },
     { type: 'divider' },
   ];
+  if(role==='admin')blocks.find(b=>b.block_id==='filters').elements.push({type:'button',action_id:'plumber_totals_open',text:{type:'plain_text',text:'💰 Plumber totals'}});
   if(compact)blocks.find(b=>b.block_id==='filters').elements=blocks.find(b=>b.block_id==='filters').elements.filter(e=>e.action_id==='refresh');
   if(store.refreshError)blocks.push({type:'section',text:{type:'mrkdwn',text:'⚠️ Refresh could not finish. Showing the last verified board; please refresh before changing a call.'}});
 
